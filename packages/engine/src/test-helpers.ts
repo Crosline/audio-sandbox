@@ -58,3 +58,22 @@ export function makeMono(samples: number[], sampleRate = 44100): AudioBuffer {
 export function makeStereo(left: number[], right: number[], sampleRate = 44100): AudioBuffer {
   return makeFakeBuffer([Float32Array.from(left), Float32Array.from(right)], { sampleRate });
 }
+
+/**
+ * A fake `BufferFactory` (see buffer-ops/factory.ts) that allocates zero-filled fake
+ * buffers — the test stand-in for `ctx.createBuffer`.
+ */
+export function fakeFactory(
+  numberOfChannels: number,
+  length: number,
+  sampleRate: number,
+): AudioBuffer {
+  const channels: Float32Array[] = [];
+  for (let c = 0; c < numberOfChannels; c++) channels.push(new Float32Array(length));
+  return makeFakeBuffer(channels, { sampleRate });
+}
+
+/** Extract a channel as a plain number[] for easy `toEqual` assertions in tests. */
+export function channelToArray(buffer: AudioBuffer, channel = 0): number[] {
+  return Array.from(buffer.getChannelData(channel));
+}

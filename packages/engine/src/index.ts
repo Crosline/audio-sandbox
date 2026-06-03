@@ -34,3 +34,26 @@ export {
   isTrackAudible,
   projectDuration,
 } from './model/project.js';
+
+// buffer-ops (destructive editing primitives, pure)
+export {
+  allocLike,
+  copy,
+  copySeconds,
+  createContextFactory,
+  cut,
+  cutSeconds,
+  fadeIn,
+  fadeInSeconds,
+  fadeOut,
+  fadeOutSeconds,
+  framesToSeconds,
+  insertSilence,
+  insertSilenceSeconds,
+  secondsToFrames,
+  silenceRegion,
+  silenceRegionSeconds,
+  trim,
+  trimSeconds,
+  type BufferFactory,
+} from './buffer-ops/index.js';
