@@ -1,19 +1,36 @@
 /**
  * @audiosandbox/engine — framework-agnostic browser audio engine.
  *
- * This package owns audio: editing buffers, the pedalboard, transport, and export.
- * It has zero UI / DOM / framework dependencies. Consumers (Svelte, React, Vue, vanilla)
- * subscribe to its events and send it commands.
+ * Owns audio: editing buffers, the pedalboard, transport, and export. Zero UI / DOM /
+ * framework dependencies. Consumers (Svelte, React, Vue, vanilla) subscribe to its
+ * events and send it commands.
  *
- * The real modules (core, model, buffer-ops, transport, effects, history, render, io,
- * analysis) land in subsequent steps. For now this entry point only proves the build
- * and exposes the package version.
+ * Modules land incrementally: core + model now; buffer-ops, transport, effects,
+ * history, render, io, analysis in later steps.
  */
 
 export const VERSION = '0.0.0';
 
-/** Clamp a value into the inclusive range [min, max]. Pure utility used across the engine. */
-export function clamp(value: number, min: number, max: number): number {
-  if (min > max) throw new RangeError('clamp: min must be <= max');
-  return Math.min(Math.max(value, min), max);
-}
+// utils
+export { clamp } from './utils.js';
+
+// core
+export { Emitter, type EventMap, type Listener } from './core/emitter.js';
+export {
+  EngineContext,
+  volumeToGain,
+  type EngineContextEvents,
+} from './core/engine-context.js';
+
+// model
+export type { Clip, Id, Project, Track } from './model/types.js';
+export {
+  anyTrackSoloed,
+  createClip,
+  createId,
+  createProject,
+  createTrack,
+  DEFAULT_GAIN,
+  isTrackAudible,
+  projectDuration,
+} from './model/project.js';
