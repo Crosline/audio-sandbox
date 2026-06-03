@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Vite
+.vite/
+
+# Local env / config
+*.local
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
+
+# Personal worktree helper scripts (not part of the project)
+claude-wt_enter.sh
+claude-wt_merge.sh
+.user_config_for_wt_scripts
