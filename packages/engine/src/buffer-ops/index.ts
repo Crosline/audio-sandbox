@@ -7,6 +7,16 @@ export {
 export { copy, cut, fadeIn, fadeOut, insertSilence, silenceRegion, trim } from './ops.js';
 
 export {
+  extractChannel,
+  mergeChannels,
+  splitChannels,
+  toMono,
+  toStereo,
+  type DownmixLaw,
+  type ToMonoOptions,
+} from './channels.js';
+
+export {
   copySeconds,
   cutSeconds,
   fadeInSeconds,

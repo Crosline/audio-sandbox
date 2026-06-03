@@ -38,11 +38,23 @@ This boundary is what makes the engine reusable from React/Vue/vanilla and publi
 
 ## Git workflow
 
-- Small, frequent commits.
-- **One feature/fix per branch.** Branch names like `feat/<thing>`, `fix/<thing>`, `docs/<thing>`.
-- Merge with **`--no-ff`** to keep history readable. (The personal `claude-wt_merge.sh` helper
-  already does `git merge --no-ff`.)
+- **One feature/fix per branch**, landing as **one commit**. Branch names like
+  `feat/<thing>`, `fix/<thing>`, `docs/<thing>`.
+- **Linear history: rebase + fast-forward.** Because each branch is a single commit, we keep
+  history flat (no merge bubbles):
+
+```bash
+git checkout -b feat/x          # branch off main
+# ...work, commit (squash to one commit)...
+git rebase main                 # replay onto latest main
+git checkout main
+git merge --ff-only feat/x      # fast-forward only — no merge commit
+git branch -d feat/x
+```
+
 - Default branch: `main`.
+- Note: the first three branches (scaffold, engine-core-model, buffer-ops) predate this and
+  landed as `--no-ff` merge commits; everything after uses rebase + ff.
 
 ## Testing convention
 
