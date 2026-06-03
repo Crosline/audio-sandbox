@@ -35,6 +35,22 @@ export {
   projectDuration,
 } from './model/project.js';
 
+// analysis (waveform peaks, level meters, FFT taps)
+export {
+  amplitudeToDb,
+  AnalyserTap,
+  extractChannelPeaks,
+  extractMonoPeaks,
+  extractPeaks,
+  frameLevels,
+  peakAmplitude,
+  rmsAmplitude,
+  type AnalyserTapOptions,
+  type ChannelPeaks,
+  type LevelReading,
+  type WaveformPeaks,
+} from './analysis/index.js';
+
 // transport (play/pause/stop/seek/loop)
 export {
   applyLoop,
