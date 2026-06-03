@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+
+# Allow these dependencies to run install scripts (pnpm blocks them by default).
+# esbuild's postinstall is required by Vite, tsup, and Vitest.
+onlyBuiltDependencies:
+  - esbuild
