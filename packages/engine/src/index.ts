@@ -35,6 +35,20 @@ export {
   projectDuration,
 } from './model/project.js';
 
+// transport (play/pause/stop/seek/loop)
+export {
+  applyLoop,
+  clampSeek,
+  currentPosition,
+  normalizeLoop,
+  rawPosition,
+  Transport,
+  type LoopRegion,
+  type PlayAnchor,
+  type TransportEvents,
+  type TransportState,
+} from './transport/index.js';
+
 // buffer-ops (destructive editing primitives, pure)
 export {
   allocLike,
