@@ -33,8 +33,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # --ignore-scripts: pnpm 11 fails a frozen install when a dependency wants to run a
+      # build script (esbuild). We don't need any dep's install script — esbuild ships a
+      # prebuilt platform binary — so we skip scripts entirely. Builds still work.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build engine
         run: pnpm --filter @audiosandbox/engine build

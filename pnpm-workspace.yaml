@@ -1,7 +1,7 @@
 packages:
   - 'packages/*'
 
-# Allow these dependencies to run install scripts (pnpm blocks them by default).
-# esbuild's postinstall is required by Vite, tsup, and Vitest.
-onlyBuiltDependencies:
-  - esbuild
+# Note: we deliberately do NOT rely on building dependency install scripts. esbuild ships
+# a prebuilt platform binary, so CI installs with `--ignore-scripts` (see the deploy
+# workflow) to avoid pnpm 11's strict ignored-builds failure. Locally, the one-time
+# "ignored builds" warning from `pnpm install` is harmless.
