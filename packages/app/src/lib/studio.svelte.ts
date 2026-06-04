@@ -19,6 +19,12 @@ import {
   type Track,
 } from '@audiosandbox/engine';
 
+/** Default horizontal scale: 100 CSS px per second of audio (before zoom). */
+const BASE_PX_PER_SEC = 100;
+/** Zoom is a multiplier on the base scale; clamp to a navigable range (~5–5000 px/s). */
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 50;
+
 export class Studio {
   readonly #engine = new EngineContext();
   readonly #transport: Transport;
@@ -30,7 +36,33 @@ export class Studio {
   playhead = $state(0);
   masterVolume = $state(80);
 
+  /**
+   * Horizontal zoom (a multiplier on {@link BASE_PX_PER_SEC}). This is a pure view
+   * concern — the engine has no notion of pixels — so it lives here, not in the model.
+   */
+  zoom = $state(1);
+
   #raf = 0;
+
+  /** CSS pixels per second of audio at the current zoom. The timeline's scale. */
+  get pxPerSec(): number {
+    return BASE_PX_PER_SEC * this.zoom;
+  }
+
+  /** Convert a time (seconds) to a horizontal offset (px) in the timeline. */
+  timeToPx(seconds: number): number {
+    return seconds * this.pxPerSec;
+  }
+
+  /** Convert a horizontal offset (px) in the timeline back to a time (seconds). */
+  pxToTime(px: number): number {
+    return px / this.pxPerSec;
+  }
+
+  /** Set the zoom multiplier, clamped to the navigable range. */
+  setZoom(next: number): void {
+    this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+  }
 
   constructor() {
     this.#transport = new Transport(this.#engine, () => this.project);
