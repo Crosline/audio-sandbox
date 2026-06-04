@@ -36,6 +36,7 @@
     <button
       class="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] text-lg text-white shadow-lg transition hover:brightness-110"
       title={isPlaying ? 'Pause' : 'Play'}
+      aria-label={isPlaying ? 'Pause' : 'Play'}
       onclick={() => (isPlaying ? studio.pause() : studio.play())}
     >
       {isPlaying ? '❚❚' : '▶'}
