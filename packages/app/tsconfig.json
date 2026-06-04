@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["svelte"],
+    "types": ["svelte", "node"],
     "moduleResolution": "Bundler",
     "allowJs": true,
     "checkJs": true

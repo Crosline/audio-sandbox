@@ -40,8 +40,8 @@ orchestral-composition suite. It is a fast, fun **sound-design sandbox** for ind
   The pure `buffer-ops` are the easiest entry point (known buffer in → assert exact samples
   out; no browser, no mocks). Real audio fixtures (small/large, mono/stereo, WAV/MP3/OGG/FLAC,
   very-short, silent) are user-provided for decode/edit/export tests and manual verification.
-- **Deploy target:** GitHub **Project Pages** → `username.github.io/audiosandbox/`
-  (Vite `base: '/audiosandbox/'`).
+- **Deploy target:** GitHub **Project Pages** (repo `Crosline/audio-sandbox`) →
+  `https://crosline.github.io/audio-sandbox/` (Vite `base: '/audio-sandbox/'`).
 
 ## Scope
 
@@ -121,9 +121,11 @@ boundary. Built with **tsup** (ESM-first, proper `exports`/`types`).
 
 ### Deployment
 
-- GitHub Project Pages at `username.github.io/audiosandbox/`.
-- Vite static build; `base: '/audiosandbox/'`; copy `index.html → 404.html` for SPA fallback; `.nojekyll`.
-- GitHub Actions workflow builds the app and publishes to a `gh-pages` branch.
+- GitHub Project Pages at `https://crosline.github.io/audio-sandbox/`.
+- Vite static build; `base: '/audio-sandbox/'`; copy `index.html → 404.html` for SPA fallback; `.nojekyll`.
+- GitHub Actions workflow (`.github/workflows/deploy.yml`) builds engine + app on push to
+  `main` and publishes via the official Pages actions (`upload-pages-artifact` +
+  `deploy-pages`). Repo Settings → Pages → Source = "GitHub Actions" (one-time).
 
 ## Key Libraries / Techniques
 

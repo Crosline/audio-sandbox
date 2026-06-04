@@ -12,7 +12,10 @@ Full design: [docs/superpowers/specs/2026-06-04-audio-sandbox-design.md](docs/su
 - **Engine:** `@audiosandbox/engine` — raw Web Audio API (no Tone.js). Built with `tsup`.
 - **Monorepo:** pnpm workspaces — `packages/engine`, `packages/app`.
 - **Tests:** Vitest (in the engine).
-- **Deploy:** GitHub Project Pages → `username.github.io/audiosandbox/` (Vite `base: '/audiosandbox/'`).
+- **Deploy:** GitHub Project Pages (repo `Crosline/audio-sandbox`) →
+  `https://crosline.github.io/audio-sandbox/` (Vite `base: '/audio-sandbox/'`). Auto-deployed
+  by `.github/workflows/deploy.yml` on push to `main`. One-time: repo Settings → Pages →
+  Source = "GitHub Actions".
 
 ## The one rule that matters most: the engine/app boundary
 
