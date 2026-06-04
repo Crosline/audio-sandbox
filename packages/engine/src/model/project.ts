@@ -9,8 +9,8 @@ export function createId(): Id {
   return crypto.randomUUID();
 }
 
-/** Default linear gain for a new track (UI shows this as 80). */
-export const DEFAULT_GAIN = 0.8;
+/** Default linear gain for a new track (unity — UI shows this as 100). */
+export const DEFAULT_GAIN = 1.0;
 
 export function createClip(buffer: AudioBuffer, name: string, start = 0): Clip {
   return { id: createId(), buffer, name, start };
@@ -54,6 +54,19 @@ export function isTrackAudible(track: Pick<Track, 'muted' | 'soloed'>, anySoloed
 /** True if any track in the list is soloed. */
 export function anyTrackSoloed(tracks: readonly Pick<Track, 'soloed'>[]): boolean {
   return tracks.some((t) => t.soloed);
+}
+
+/**
+ * The linear gain a track's live gain node should carry, given the project's solo state:
+ * `0` when the track is not audible (muted, or un-soloed while something else is soloed),
+ * otherwise the track's own linear `gain`. Pure so the transport's level logic is
+ * unit-testable without an AudioContext.
+ */
+export function trackTargetGain(
+  track: Pick<Track, 'muted' | 'soloed' | 'gain'>,
+  anySoloed: boolean,
+): number {
+  return isTrackAudible(track, anySoloed) ? track.gain : 0;
 }
 
 /** Total project duration in seconds: the end of the latest clip across all tracks. */

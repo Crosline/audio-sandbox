@@ -50,6 +50,26 @@ export async function rulerCanvas(page: Page): Promise<{
   return info;
 }
 
+/** The id of the track at `index` in the project, via the test hook. */
+export function trackIdAt(page: Page, index: number): Promise<string> {
+  return page.evaluate((i) => {
+    const studio = (window as unknown as { __studio: { project: { tracks: { id: string }[] } } })
+      .__studio;
+    const id = studio.project.tracks[i]?.id;
+    if (!id) throw new Error(`no track at index ${i}`);
+    return id;
+  }, index);
+}
+
+/** A track's live gain-node value, via the test hook (undefined if not yet wired). */
+export function liveTrackGain(page: Page, trackId: string): Promise<number | undefined> {
+  return page.evaluate((id) => {
+    const studio = (window as unknown as { __studio: { liveTrackGain(id: string): number | undefined } })
+      .__studio;
+    return studio.liveTrackGain(id);
+  }, trackId);
+}
+
 /** Widths (px) of the track waveform lanes, in DOM order. */
 export function laneWidths(page: Page): Promise<number[]> {
   return page.evaluate(() =>

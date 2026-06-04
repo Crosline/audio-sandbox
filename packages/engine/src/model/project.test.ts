@@ -8,6 +8,7 @@ import {
   DEFAULT_GAIN,
   isTrackAudible,
   projectDuration,
+  trackTargetGain,
 } from './project.js';
 
 describe('model constructors', () => {
@@ -66,6 +67,24 @@ describe('anyTrackSoloed', () => {
   });
   it('is false for an empty project', () => {
     expect(anyTrackSoloed([])).toBe(false);
+  });
+});
+
+describe('trackTargetGain (live mixer level)', () => {
+  it('is the track gain when audible (nothing soloed)', () => {
+    expect(trackTargetGain({ muted: false, soloed: false, gain: 0.5 }, false)).toBe(0.5);
+  });
+
+  it('is 0 for a muted track', () => {
+    expect(trackTargetGain({ muted: true, soloed: false, gain: 0.8 }, false)).toBe(0);
+  });
+
+  it('is 0 for an un-soloed track while another is soloed', () => {
+    expect(trackTargetGain({ muted: false, soloed: false, gain: 0.8 }, true)).toBe(0);
+  });
+
+  it('is the track gain for a soloed track while solo is active', () => {
+    expect(trackTargetGain({ muted: false, soloed: true, gain: 0.7 }, true)).toBe(0.7);
   });
 });
 

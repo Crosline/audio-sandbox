@@ -10,7 +10,7 @@
  */
 import { Emitter } from '../core/emitter.js';
 import type { EngineContext } from '../core/engine-context.js';
-import { anyTrackSoloed, isTrackAudible } from '../model/project.js';
+import { anyTrackSoloed, trackTargetGain } from '../model/project.js';
 import type { Project } from '../model/types.js';
 import {
   clampSeek,
@@ -46,6 +46,11 @@ export class Transport {
   #anchor: PlayAnchor | null = null;
   #loop: LoopRegion | null = null;
   #sources: ScheduledSource[] = [];
+  /** Per-track gain node: clip sources → trackGain → master. Created lazily. */
+  #trackGains = new Map<string, GainNode>();
+
+  /** Declick ramp time constant (seconds) for live gain changes — ~10 ms, no clicks. */
+  static readonly #RAMP = 0.01;
 
   constructor(ctx: EngineContext, getProject: () => Project) {
     this.#ctx = ctx;
@@ -124,10 +129,12 @@ export class Transport {
     this.#anchor = { startPosition: fromPosition, startClock };
 
     const project = this.#getProject();
-    const soloed = anyTrackSoloed(project.tracks);
 
     for (const track of project.tracks) {
-      if (!isTrackAudible(track, soloed)) continue;
+      // Audibility is now carried by the per-track gain node (set via applyTrackLevels),
+      // so we schedule sources for every track and let the live gain mute/solo them. This
+      // is what lets mute/solo/volume changes take effect mid-playback.
+      const trackGain = this.#trackGain(track.id);
       for (const clip of track.clips) {
         const clipStart = clip.start;
         const clipEnd = clip.start + clip.buffer.duration;
@@ -135,7 +142,7 @@ export class Transport {
 
         const node = ctx.createBufferSource();
         node.buffer = clip.buffer;
-        node.connect(this.#ctx.master);
+        node.connect(trackGain);
 
         if (fromPosition <= clipStart) {
           // Clip begins in the future: start it after the lead-in delay.
@@ -146,6 +153,54 @@ export class Transport {
         }
         this.#sources.push({ node });
       }
+    }
+
+    // Initialise the per-track levels for this playback pass (mute/solo/volume).
+    this.applyTrackLevels();
+  }
+
+  /** Get (creating + caching, and wiring to master) the gain node for a track. */
+  #trackGain(trackId: string): GainNode {
+    let node = this.#trackGains.get(trackId);
+    if (!node) {
+      node = this.#ctx.context.createGain();
+      node.connect(this.#ctx.master);
+      this.#trackGains.set(trackId, node);
+    }
+    return node;
+  }
+
+  /**
+   * Recompute every track's live gain from the current model and ramp the per-track gain
+   * nodes to it. Call after any mute / solo / volume change so it is heard immediately —
+   * whether or not playback is running (when stopped it just sets the next play's targets).
+   */
+  applyTrackLevels(): void {
+    const project = this.#getProject();
+    const soloed = anyTrackSoloed(project.tracks);
+    const now = this.#ctx.currentTime;
+    for (const track of project.tracks) {
+      const node = this.#trackGain(track.id);
+      const target = trackTargetGain(track, soloed);
+      // Smooth ramp instead of an instant set — avoids clicks on mute/unmute/drag.
+      node.gain.setTargetAtTime(target, now, Transport.#RAMP);
+    }
+  }
+
+  /**
+   * The current value of a track's live gain node, or `undefined` if no node exists yet.
+   * Read-only — exposed for verification (tests / debugging), not for control.
+   */
+  liveTrackGain(trackId: string): number | undefined {
+    return this.#trackGains.get(trackId)?.gain.value;
+  }
+
+  /** Release a removed track's gain node (disconnect + drop) to avoid a graph leak. */
+  releaseTrack(trackId: string): void {
+    const node = this.#trackGains.get(trackId);
+    if (node) {
+      node.disconnect();
+      this.#trackGains.delete(trackId);
     }
   }
 
@@ -169,6 +224,8 @@ export class Transport {
 
   dispose(): void {
     this.#stopSources();
+    for (const node of this.#trackGains.values()) node.disconnect();
+    this.#trackGains.clear();
     this.events.clear();
   }
 }

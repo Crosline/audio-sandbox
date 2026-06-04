@@ -100,6 +100,7 @@ export class Studio {
       ...this.project,
       tracks: this.project.tracks.filter((t) => t.id !== trackId),
     };
+    this.#transport.releaseTrack(trackId);
   }
 
   /** Replace a track (e.g. after mute/solo/volume change or editing a clip). */
@@ -112,17 +113,26 @@ export class Studio {
 
   toggleMute(trackId: string): void {
     const t = this.project.tracks.find((x) => x.id === trackId);
-    if (t) this.updateTrack({ ...t, muted: !t.muted });
+    if (t) {
+      this.updateTrack({ ...t, muted: !t.muted });
+      this.#transport.applyTrackLevels();
+    }
   }
 
   toggleSolo(trackId: string): void {
     const t = this.project.tracks.find((x) => x.id === trackId);
-    if (t) this.updateTrack({ ...t, soloed: !t.soloed });
+    if (t) {
+      this.updateTrack({ ...t, soloed: !t.soloed });
+      this.#transport.applyTrackLevels();
+    }
   }
 
   setTrackGain(trackId: string, gain: number): void {
     const t = this.project.tracks.find((x) => x.id === trackId);
-    if (t) this.updateTrack({ ...t, gain });
+    if (t) {
+      this.updateTrack({ ...t, gain });
+      this.#transport.applyTrackLevels();
+    }
   }
 
   /**
@@ -163,6 +173,11 @@ export class Studio {
   seek(seconds: number): void {
     this.#transport.seek(seconds);
     this.playhead = seconds;
+  }
+
+  /** Read a track's live gain-node value (for verification / E2E). Undefined if unwired. */
+  liveTrackGain(trackId: string): number | undefined {
+    return this.#transport.liveTrackGain(trackId);
   }
 
   setMasterVolume(volume0to100: number): void {

@@ -33,6 +33,7 @@ export {
   DEFAULT_GAIN,
   isTrackAudible,
   projectDuration,
+  trackTargetGain,
 } from './model/project.js';
 
 // analysis (waveform peaks, level meters, FFT taps)

@@ -8,6 +8,11 @@
 
   const studio = new Studio();
 
+  // Read-only test hook: lets E2E specs inspect live audio-graph state (e.g. per-track
+  // gain) that has no visible DOM representation. Harmless in prod; it only exposes the
+  // same Studio the UI already drives.
+  (globalThis as unknown as { __studio?: Studio }).__studio = studio;
+
   // Track accent colors cycle through the sketch's purple / pink / teal.
   const TRACK_COLORS = ['#7c5cff', '#ec4899', '#22d3ee'];
   function colorFor(index: number): string {
