@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Studio } from '../lib/studio.svelte.js';
+  import { formatTime } from '../lib/time.js';
 
   interface Props {
     studio: Studio;
@@ -7,19 +8,8 @@
 
   let { studio }: Props = $props();
 
-  // Format seconds as MM:SS.mmm to match the sketch's time display.
-  function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
-    return (
-      `${String(m).padStart(2, '0')}:` +
-      `${String(s).padStart(2, '0')}.` +
-      `${String(ms).padStart(3, '0')}`
-    );
-  }
-
   let isPlaying = $derived(studio.transportState === 'playing');
+  let sel = $derived(studio.selection);
 </script>
 
 <div
@@ -41,6 +31,17 @@
     >
       {isPlaying ? '❚❚' : '▶'}
     </button>
+  </div>
+
+  <!-- Selection readout, next to the transport. -->
+  <div class="min-w-44 text-xs tabular-nums text-[var(--color-muted)]" data-testid="selection-readout">
+    {#if sel && sel.end > sel.start}
+      <span class="text-[var(--color-text)]">Sel</span>
+      {formatTime(sel.start)} → {formatTime(sel.end)}
+      <span class="text-[var(--color-text)]">· {(sel.end - sel.start).toFixed(3)}s</span>
+    {:else}
+      No selection
+    {/if}
   </div>
 
   <div class="flex-1 text-center">

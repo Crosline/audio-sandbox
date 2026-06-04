@@ -56,6 +56,15 @@ export function insertSilenceSeconds(
   );
 }
 
+export function insertBufferSeconds(
+  dst: AudioBuffer,
+  src: AudioBuffer,
+  atSec: number,
+  factory: BufferFactory,
+): AudioBuffer {
+  return ops.insertBuffer(dst, src, secondsToFrames(dst, atSec), factory);
+}
+
 export function silenceRegionSeconds(
   buffer: AudioBuffer,
   startSec: number,

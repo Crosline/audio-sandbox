@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { channelToArray, fakeFactory, makeMono, makeStereo } from '../test-helpers.js';
-import { copy, cut, fadeIn, fadeOut, insertSilence, silenceRegion, trim } from './ops.js';
+import {
+  copy,
+  cut,
+  fadeIn,
+  fadeOut,
+  insertBuffer,
+  insertSilence,
+  silenceRegion,
+  trim,
+} from './ops.js';
 
 // A readable signal: 1..8, so positions are easy to reason about.
 const SIG = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -104,6 +113,50 @@ describe('insertSilence', () => {
   it('a zero-length insert is a faithful copy', () => {
     const out = insertSilence(makeMono([1, 2, 3]), 1, 0, fakeFactory);
     expect(channelToArray(out)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('insertBuffer', () => {
+  it('splices the source samples in at the insertion point', () => {
+    const out = insertBuffer(makeMono([1, 2, 3, 4]), makeMono([7, 8]), 2, fakeFactory);
+    expect(channelToArray(out)).toEqual([1, 2, 7, 8, 3, 4]);
+    expect(out.length).toBe(6);
+  });
+
+  it('inserting at 0 prepends the source', () => {
+    const out = insertBuffer(makeMono([1, 2]), makeMono([9]), 0, fakeFactory);
+    expect(channelToArray(out)).toEqual([9, 1, 2]);
+  });
+
+  it('inserting at the end appends the source', () => {
+    const out = insertBuffer(makeMono([1, 2]), makeMono([9]), 2, fakeFactory);
+    expect(channelToArray(out)).toEqual([1, 2, 9]);
+  });
+
+  it('inserts into all channels', () => {
+    const out = insertBuffer(makeStereo([1, 2], [3, 4]), makeStereo([7], [8]), 1, fakeFactory);
+    expect(channelToArray(out, 0)).toEqual([1, 7, 2]);
+    expect(channelToArray(out, 1)).toEqual([3, 8, 4]);
+  });
+
+  it('clamps an out-of-range insertion point to the end', () => {
+    const out = insertBuffer(makeMono([1, 2]), makeMono([9]), 99, fakeFactory);
+    expect(channelToArray(out)).toEqual([1, 2, 9]);
+  });
+
+  it('does not mutate either input', () => {
+    const dst = makeMono([1, 2, 3]);
+    const src = makeMono([9]);
+    insertBuffer(dst, src, 1, fakeFactory);
+    expect(channelToArray(dst)).toEqual([1, 2, 3]);
+    expect(channelToArray(src)).toEqual([9]);
+  });
+
+  it('only writes channels the destination has (mono src into stereo dst)', () => {
+    const out = insertBuffer(makeStereo([1, 2], [3, 4]), makeMono([9]), 1, fakeFactory);
+    expect(channelToArray(out, 0)).toEqual([1, 9, 2]);
+    // src has no channel 1, so the inserted frame on the right channel stays zero-filled.
+    expect(channelToArray(out, 1)).toEqual([3, 0, 4]);
   });
 });
 

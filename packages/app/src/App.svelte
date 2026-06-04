@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { projectDuration, VERSION } from '@audiosandbox/engine';
+  import EditButtons from './components/EditButtons.svelte';
   import TimelineRuler from './components/TimelineRuler.svelte';
   import TrackRow from './components/TrackRow.svelte';
   import TransportBar from './components/TransportBar.svelte';
@@ -86,7 +87,41 @@
     dragging = false;
     if (e.dataTransfer?.files?.length) void loadFiles(e.dataTransfer.files);
   }
+
+  // Editing keyboard shortcuts, scoped to the window. Skip when typing in a field so they
+  // don't hijack text input.
+  function onKeydown(e: KeyboardEvent): void {
+    const el = e.target as HTMLElement | null;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+      return;
+    }
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) studio.redo();
+      else studio.undo();
+    } else if (mod && e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      studio.redo();
+    } else if (mod && e.key.toLowerCase() === 'x') {
+      e.preventDefault();
+      studio.cut();
+    } else if (mod && e.key.toLowerCase() === 'c') {
+      e.preventDefault();
+      studio.copy();
+    } else if (mod && e.key.toLowerCase() === 'v') {
+      e.preventDefault();
+      studio.paste();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (studio.selection) {
+        e.preventDefault();
+        studio.deleteSelection();
+      }
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="flex h-full flex-col">
   <!-- Header -->
@@ -100,6 +135,10 @@
     </div>
     <h1 class="text-lg font-semibold tracking-tight">Audio Sandbox</h1>
     <span class="text-sm text-[var(--color-muted)]">Untitled Project</span>
+
+    <!-- Edit controls: Cut/Copy/Paste/Delete/Silence/Trim/Fades · Undo/Redo. -->
+    <div class="ml-4"><EditButtons {studio} /></div>
+
     <div class="ml-auto flex items-center gap-2">
       <!-- Zoom controls: − / readout / + / Fit -->
       <div class="flex items-center gap-1 rounded-lg bg-[var(--color-surface-2)] p-0.5">

@@ -7,24 +7,56 @@
  * Svelte-side embodiment of the engine/app boundary.
  */
 import {
+  copySeconds,
   createClip,
   createContextFactory,
   createProject,
   createTrack,
+  cutSeconds,
   EngineContext,
+  fadeInSeconds,
+  fadeOutSeconds,
+  History,
+  insertBufferSeconds,
   projectDuration,
+  silenceRegionSeconds,
   Transport,
+  trimSeconds,
   type BufferFactory,
   type Clip,
   type Project,
   type Track,
 } from '@audiosandbox/engine';
 
+/** A time-range selection (seconds, relative to the clip) on one clip of one track. */
+export interface Selection {
+  trackId: string;
+  clipId: string;
+  /** Selection start in seconds from the clip's own origin. */
+  start: number;
+  /** Selection end in seconds from the clip's own origin (>= start). */
+  end: number;
+}
+
+/** An undo snapshot: a clip's prior buffer plus where it lives, so undo can restore it. */
+interface ClipSnapshot {
+  trackId: string;
+  clipId: string;
+  buffer: AudioBuffer;
+}
+
+/** Rough byte size of an AudioBuffer (Float32 samples), for the history budget. */
+function bufferBytes(buffer: AudioBuffer): number {
+  return buffer.length * buffer.numberOfChannels * 4;
+}
+
 /** Default horizontal scale: 100 CSS px per second of audio (before zoom). */
 const BASE_PX_PER_SEC = 100;
 /** Zoom is a multiplier on the base scale; clamp to a navigable range (~5–5000 px/s). */
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 50;
+/** Undo/redo budget: up to 50 edits or ~256 MB of snapshots, whichever binds first. */
+const HISTORY_LIMITS = { maxEntries: 50, maxBytes: 256 * 1024 * 1024 };
 
 export class Studio {
   readonly #engine = new EngineContext();
@@ -42,6 +74,24 @@ export class Studio {
    * concern — the engine has no notion of pixels — so it lives here, not in the model.
    */
   zoom = $state(1);
+
+  /** The current time-range selection, or null. Drives the highlight and edit enablement. */
+  selection = $state<Selection | null>(null);
+  /** Mirrors of the history flags so buttons react. Refreshed after every edit/undo/redo. */
+  canUndo = $state(false);
+  canRedo = $state(false);
+  /** Reactive mirror of "is there something to paste?" (the clipboard itself isn't reactive). */
+  canPaste = $state(false);
+
+  /** Bounded undo/redo of clip-buffer edits (see {@link HISTORY_LIMITS}). */
+  readonly #history = new History<ClipSnapshot>(HISTORY_LIMITS);
+  /** Cut/copy place the selected slice here; paste reads it. Not reactive. */
+  #clipboard: AudioBuffer | null = null;
+  /**
+   * Absolute timeline second at which a selection-audition should stop, or null when
+   * playing the whole project. Read by the RAF loop; set by {@link play}.
+   */
+  #playRangeEnd: number | null = null;
 
   #raf = 0;
 
@@ -135,6 +185,177 @@ export class Studio {
     }
   }
 
+  // ---- selection + editing ----
+
+  /** Look up a clip by track + clip id, or undefined if it's gone. */
+  #findClip(trackId: string, clipId: string): { track: Track; clip: Clip } | undefined {
+    const track = this.project.tracks.find((t) => t.id === trackId);
+    const clip = track?.clips.find((c) => c.id === clipId);
+    return track && clip ? { track, clip } : undefined;
+  }
+
+  /** The clip the current selection points at (if any). */
+  #selectedClip(): { track: Track; clip: Clip; sel: Selection } | undefined {
+    const sel = this.selection;
+    if (!sel) return undefined;
+    const found = this.#findClip(sel.trackId, sel.clipId);
+    return found ? { ...found, sel } : undefined;
+  }
+
+  /** Replace a clip's buffer in the model (immutably). */
+  #replaceClipBuffer(trackId: string, clipId: string, buffer: AudioBuffer): void {
+    const track = this.project.tracks.find((t) => t.id === trackId);
+    if (!track) return;
+    this.updateTrack({
+      ...track,
+      clips: track.clips.map((c) => (c.id === clipId ? { ...c, buffer } : c)),
+    });
+  }
+
+  /** Set (or clear) the selection, clamping its range to the target clip's duration. */
+  setSelection(sel: Selection | null): void {
+    if (!sel) {
+      this.clearSelection();
+      return;
+    }
+    const found = this.#findClip(sel.trackId, sel.clipId);
+    if (!found) return;
+    const dur = found.clip.buffer.duration;
+    const start = Math.max(0, Math.min(sel.start, sel.end));
+    const end = Math.min(dur, Math.max(sel.start, sel.end));
+    this.selection = { ...sel, start, end };
+  }
+
+  clearSelection(): void {
+    this.selection = null;
+    this.#playRangeEnd = null;
+  }
+
+  /**
+   * Run a destructive buffer-op against the selected clip: snapshot the old buffer for undo,
+   * transform it, swap in the result. Length-changing edits collapse the selection to its
+   * start (the old [start,end) no longer maps onto the new buffer). The shared path for
+   * cut/delete/silence/trim/paste/fades, so undo is uniform.
+   */
+  #editSelectedClip(
+    label: string,
+    transform: (buffer: AudioBuffer, sel: Selection, factory: BufferFactory) => AudioBuffer,
+    collapseSelection = true,
+  ): void {
+    const target = this.#selectedClip();
+    if (!target) return;
+    const { clip, sel } = target;
+    const before = clip.buffer;
+    const after = transform(before, sel, this.bufferFactory);
+    this.#history.push(
+      label,
+      { trackId: sel.trackId, clipId: sel.clipId, buffer: before },
+      bufferBytes(before),
+    );
+    this.#replaceClipBuffer(sel.trackId, sel.clipId, after);
+    if (collapseSelection) this.selection = { ...sel, end: sel.start };
+    this.#refreshHistoryFlags();
+  }
+
+  copy(): void {
+    const target = this.#selectedClip();
+    if (!target) return;
+    const { clip, sel } = target;
+    this.#setClipboard(copySeconds(clip.buffer, sel.start, sel.end, this.bufferFactory));
+  }
+
+  cut(): void {
+    const target = this.#selectedClip();
+    if (!target) return;
+    const { clip, sel } = target;
+    this.#setClipboard(copySeconds(clip.buffer, sel.start, sel.end, this.bufferFactory));
+    this.#editSelectedClip('Cut', (buf, s, f) => cutSeconds(buf, s.start, s.end, f).remaining);
+  }
+
+  deleteSelection(): void {
+    this.#editSelectedClip('Delete', (buf, s, f) => cutSeconds(buf, s.start, s.end, f).remaining);
+  }
+
+  silence(): void {
+    this.#editSelectedClip(
+      'Silence',
+      (buf, s, f) => silenceRegionSeconds(buf, s.start, s.end, f),
+      false,
+    );
+  }
+
+  trim(): void {
+    this.#editSelectedClip('Trim', (buf, s, f) => trimSeconds(buf, s.start, s.end, f));
+  }
+
+  fadeIn(): void {
+    this.#editSelectedClip('Fade in', (buf, s, f) => fadeInSeconds(buf, s.start, s.end, f), false);
+  }
+
+  fadeOut(): void {
+    this.#editSelectedClip('Fade out', (buf, s, f) => fadeOutSeconds(buf, s.start, s.end, f), false);
+  }
+
+  /** Paste the clipboard into the selected clip at the selection start. */
+  paste(): void {
+    if (!this.#clipboard) return;
+    const clipboard = this.#clipboard;
+    this.#editSelectedClip('Paste', (buf, s, f) => insertBufferSeconds(buf, clipboard, s.start, f));
+  }
+
+  undo(): void {
+    const target = this.#historyTargetClip();
+    if (!target) return;
+    const restored = this.#history.undo(
+      { trackId: target.trackId, clipId: target.clipId, buffer: target.buffer },
+      bufferBytes(target.buffer),
+    );
+    if (!restored) return;
+    this.#replaceClipBuffer(restored.state.trackId, restored.state.clipId, restored.state.buffer);
+    this.#refreshHistoryFlags();
+  }
+
+  redo(): void {
+    const target = this.#historyTargetClip();
+    if (!target) return;
+    const restored = this.#history.redo(
+      { trackId: target.trackId, clipId: target.clipId, buffer: target.buffer },
+      bufferBytes(target.buffer),
+    );
+    if (!restored) return;
+    this.#replaceClipBuffer(restored.state.trackId, restored.state.clipId, restored.state.buffer);
+    this.#refreshHistoryFlags();
+  }
+
+  /**
+   * The clip whose current buffer undo/redo should stash. The history entry carries its own
+   * target ids; here we just need *a* clip whose live buffer to push onto the opposite stack.
+   * Prefer the selected clip, else the first clip of the first track (single-clip-per-track
+   * in v1).
+   */
+  #historyTargetClip(): { trackId: string; clipId: string; buffer: AudioBuffer } | undefined {
+    const sel = this.selection;
+    if (sel) {
+      const found = this.#findClip(sel.trackId, sel.clipId);
+      if (found) return { trackId: sel.trackId, clipId: sel.clipId, buffer: found.clip.buffer };
+    }
+    for (const track of this.project.tracks) {
+      const clip = track.clips[0];
+      if (clip) return { trackId: track.id, clipId: clip.id, buffer: clip.buffer };
+    }
+    return undefined;
+  }
+
+  #refreshHistoryFlags(): void {
+    this.canUndo = this.#history.canUndo;
+    this.canRedo = this.#history.canRedo;
+  }
+
+  #setClipboard(buffer: AudioBuffer): void {
+    this.#clipboard = buffer;
+    this.canPaste = true;
+  }
+
   /**
    * Decode an audio file and append it as a new clip on a track (creating a track if none
    * is given). Returns the new clip.
@@ -158,6 +379,15 @@ export class Studio {
   // ---- transport ----
 
   async play(): Promise<void> {
+    // Auditioning a selection: seek to its start and arrange to stop at its end. Times are
+    // absolute on the timeline (clip origin + selection offset), matching the RAF position.
+    const target = this.#selectedClip();
+    if (target && target.sel.end > target.sel.start) {
+      this.seek(target.clip.start + target.sel.start); // seek() clears #playRangeEnd...
+      this.#playRangeEnd = target.clip.start + target.sel.end; // ...so set it after.
+    } else {
+      this.#playRangeEnd = null;
+    }
     await this.#transport.play();
   }
 
@@ -168,11 +398,13 @@ export class Studio {
   stop(): void {
     this.#transport.stop();
     this.playhead = 0;
+    this.#playRangeEnd = null;
   }
 
   seek(seconds: number): void {
     this.#transport.seek(seconds);
     this.playhead = seconds;
+    this.#playRangeEnd = null;
   }
 
   /** Read a track's live gain-node value (for verification / E2E). Undefined if unwired. */
@@ -190,10 +422,11 @@ export class Studio {
   #startPlayheadLoop(): void {
     const tick = (): void => {
       const pos = this.#transport.position;
-      // Stop when playback reaches the end of the project (reset playhead to 0). The
-      // engine's `ended` event is reserved for a future engine-side scheduler; here we
-      // detect it from the derived position, which is what the loop already reads.
-      const end = projectDuration(this.project);
+      // Stop at the end of the selection-audition range if one is active, otherwise at the
+      // end of the project (reset playhead to 0). The engine's `ended` event is reserved for
+      // a future engine-side scheduler; here we detect it from the derived position, which is
+      // what the loop already reads.
+      const end = this.#playRangeEnd ?? projectDuration(this.project);
       if (end > 0 && pos >= end) {
         this.stop();
         return; // stop() leaves the `playing` state, so the loop ends here.

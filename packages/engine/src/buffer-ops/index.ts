@@ -4,7 +4,16 @@ export {
   type BufferFactory,
 } from './factory.js';
 
-export { copy, cut, fadeIn, fadeOut, insertSilence, silenceRegion, trim } from './ops.js';
+export {
+  copy,
+  cut,
+  fadeIn,
+  fadeOut,
+  insertBuffer,
+  insertSilence,
+  silenceRegion,
+  trim,
+} from './ops.js';
 
 export {
   extractChannel,
@@ -22,6 +31,7 @@ export {
   fadeInSeconds,
   fadeOutSeconds,
   framesToSeconds,
+  insertBufferSeconds,
   insertSilenceSeconds,
   secondsToFrames,
   silenceRegionSeconds,

@@ -112,6 +112,27 @@ export function insertSilence(
 }
 
 /**
+ * Insert all frames of `src` into `dst` at frame `at`, producing a buffer of length
+ * `dst.length + src.length`. The "paste" primitive (counterpart to {@link insertSilence},
+ * which inserts zeros). Channels are matched by index via {@link blit}: only channels the
+ * destination has are written, and only channels the source has carry samples — so a mono
+ * source pasted into a stereo destination leaves the other channel's inserted frames silent.
+ */
+export function insertBuffer(
+  dst: AudioBuffer,
+  src: AudioBuffer,
+  at: number,
+  factory: BufferFactory,
+): AudioBuffer {
+  const pos = clampFrame(at, dst.length);
+  const out = allocLike(factory, dst, dst.length + src.length);
+  blit(dst, out, 0, pos, 0); // head: [0, pos)
+  blit(src, out, 0, src.length, pos); // inserted slice
+  blit(dst, out, pos, dst.length, pos + src.length); // tail shifted right
+  return out;
+}
+
+/**
  * Zero out frames `[start, end)` in place-of a copy — returns a same-length buffer with
  * that region silenced and everything else preserved. "Silence a selection."
  */

@@ -66,6 +66,9 @@ export {
   type TransportState,
 } from './transport/index.js';
 
+// history (bounded undo/redo stack, pure)
+export { History, type HistoryLimits } from './history/index.js';
+
 // buffer-ops (destructive editing primitives, pure)
 export {
   allocLike,
@@ -80,6 +83,8 @@ export {
   fadeOut,
   fadeOutSeconds,
   framesToSeconds,
+  insertBuffer,
+  insertBufferSeconds,
   insertSilence,
   insertSilenceSeconds,
   mergeChannels,
