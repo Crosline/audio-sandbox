@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter app dev",
     "build": "pnpm --filter @audiosandbox/engine build && pnpm --filter app build",
-    "test": "pnpm --filter @audiosandbox/engine test",
+    "test": "pnpm -r test",
     "build:engine": "pnpm --filter @audiosandbox/engine build",
     "build:app": "pnpm --filter app build"
   },
