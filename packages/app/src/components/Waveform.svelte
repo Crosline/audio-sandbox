@@ -1,34 +1,25 @@
 <script lang="ts">
   import { extractPeaks } from '@audiosandbox/engine';
+  import { canvasSizing } from '../lib/canvas.js';
 
   interface Props {
     buffer: AudioBuffer;
+    /** Width in CSS pixels. Driven by duration × pxPerSec, so it carries the timeline scale. */
+    width: number;
     /** CSS color for the filled waveform. */
     color?: string;
     /** Height in CSS pixels. */
     height?: number;
   }
 
-  let { buffer, color = '#7c5cff', height = 96 }: Props = $props();
+  let { buffer, width, color = '#7c5cff', height = 96 }: Props = $props();
 
   let canvas: HTMLCanvasElement;
-  let width = $state(0);
-  let host: HTMLDivElement;
 
-  // Redraw whenever the buffer, measured width, or height changes.
+  // Redraw whenever the buffer, width (zoom), height, or color changes.
   $effect(() => {
-    if (!canvas || width === 0) return;
+    if (!canvas || width <= 0) return;
     draw(canvas, buffer, width, height, color);
-  });
-
-  // Track the element's pixel width so the waveform fills its column responsively.
-  $effect(() => {
-    if (!host) return;
-    const ro = new ResizeObserver((entries) => {
-      width = Math.floor(entries[0]!.contentRect.width);
-    });
-    ro.observe(host);
-    return () => ro.disconnect();
   });
 
   function draw(
@@ -38,21 +29,24 @@
     h: number,
     fill: string,
   ): void {
+    // Work in backing-store pixels, capped below the browser's max canvas dimension. The
+    // canvas stretches via CSS (`w-full`) to the true display width `w`, so beyond the cap
+    // the waveform loses resolution but never blanks.
     const dpr = window.devicePixelRatio || 1;
-    cv.width = Math.max(1, Math.floor(w * dpr));
-    cv.height = Math.max(1, Math.floor(h * dpr));
+    const { pixelWidth, pixelHeight } = canvasSizing(w, h, dpr);
+    cv.width = pixelWidth;
+    cv.height = pixelHeight;
     const ctx = cv.getContext('2d');
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, pixelWidth, pixelHeight);
 
-    // One min/max bin per horizontal pixel. Collapse channels to a mono overview.
-    const peaks = extractPeaks(buf, w);
-    const mid = h / 2;
-    const amp = h / 2;
+    // One min/max bin per backing-store column. Collapse channels to a mono overview.
+    const peaks = extractPeaks(buf, pixelWidth);
+    const mid = pixelHeight / 2;
+    const amp = pixelHeight / 2;
 
     ctx.fillStyle = fill;
-    for (let x = 0; x < w; x++) {
+    for (let x = 0; x < pixelWidth; x++) {
       let lo = 0;
       let hi = 0;
       for (const ch of peaks.channels) {
@@ -66,6 +60,6 @@
   }
 </script>
 
-<div bind:this={host} class="relative w-full" style="height: {height}px">
+<div class="relative" style="width: {width}px; height: {height}px">
   <canvas bind:this={canvas} class="block h-full w-full"></canvas>
 </div>

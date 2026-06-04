@@ -1,5 +1,6 @@
 <script lang="ts">
   import { projectDuration, VERSION } from '@audiosandbox/engine';
+  import TimelineRuler from './components/TimelineRuler.svelte';
   import TrackRow from './components/TrackRow.svelte';
   import TransportBar from './components/TransportBar.svelte';
   import { Studio } from './lib/studio.svelte.js';
@@ -16,9 +17,18 @@
   let dragging = $state(false);
   let loadError = $state<string | null>(null);
   let fileInput: HTMLInputElement;
+  let scroller: HTMLElement;
 
   // The waveform lane starts after the 176px (w-44) track header.
   const HEADER_W = 176;
+
+  // Total timeline width in px: project duration at the current scale. Lanes, ruler, and
+  // playhead all live in this coordinate space, which may exceed the viewport (→ scroll).
+  let contentWidth = $derived(studio.timeToPx(duration));
+
+  function onRulerSeek(seconds: number): void {
+    studio.seek(Math.max(0, seconds));
+  }
 
   async function loadFiles(files: FileList | File[]): Promise<void> {
     loadError = null;
@@ -35,15 +45,6 @@
     e.preventDefault();
     dragging = false;
     if (e.dataTransfer?.files?.length) void loadFiles(e.dataTransfer.files);
-  }
-
-  // Seek by clicking in the timeline ruler (play-from-point). The ruler is the lane area
-  // to the right of the track headers, so x maps directly to time.
-  function onRulerSeek(e: MouseEvent): void {
-    if (duration === 0) return;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const frac = (e.clientX - rect.left) / rect.width;
-    studio.seek(Math.max(0, Math.min(1, frac)) * duration);
   }
 </script>
 
@@ -85,6 +86,7 @@
 
   <!-- Tracks area -->
   <main
+    bind:this={scroller}
     class="relative flex-1 overflow-auto {dragging ? 'ring-2 ring-inset ring-[var(--color-accent)]' : ''}"
     role="region"
     aria-label="Timeline"
@@ -95,22 +97,6 @@
     ondragleave={() => (dragging = false)}
     ondrop={onDrop}
   >
-    <!-- Timeline ruler: click to seek (play-from-point) -->
-    {#if studio.project.tracks.length > 0}
-      <div class="flex border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div class="w-44 shrink-0 border-r border-[var(--color-border)] px-3 py-1 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">
-          Timeline
-        </div>
-        <button
-          type="button"
-          class="h-6 flex-1 cursor-text bg-[var(--color-bg)]"
-          aria-label="Seek"
-          title="Click to seek"
-          onclick={onRulerSeek}
-        ></button>
-      </div>
-    {/if}
-
     {#if studio.project.tracks.length === 0}
       <div
         class="grid h-full place-items-center text-center text-[var(--color-muted)]"
@@ -121,16 +107,25 @@
         </div>
       </div>
     {:else}
+      <!-- Timeline ruler row: pinned label + scrolling tick ruler. -->
+      <div class="flex border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div
+          class="sticky left-0 z-20 flex w-44 shrink-0 items-center border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]"
+        >
+          Timeline
+        </div>
+        <TimelineRuler pxPerSec={studio.pxPerSec} width={contentWidth} onseek={onRulerSeek} />
+      </div>
+
       {#each studio.project.tracks as track, i (track.id)}
         <TrackRow {studio} {track} color={colorFor(i)} />
       {/each}
 
-      <!-- Playhead overlay -->
+      <!-- Playhead overlay: positioned in the scrolling content, so it moves with the lanes. -->
       {#if duration > 0}
         <div
-          class="pointer-events-none absolute top-0 bottom-0 w-px bg-white/80"
-          style="left: calc({HEADER_W}px + (100% - {HEADER_W}px) * {studio.playhead /
-            duration})"
+          class="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-white/80"
+          style="left: {HEADER_W + studio.timeToPx(studio.playhead)}px"
         ></div>
       {/if}
     {/if}

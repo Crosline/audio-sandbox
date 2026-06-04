@@ -14,12 +14,16 @@
 
   // For now a track shows its first clip's waveform (multi-clip layout comes later).
   let clip = $derived(track.clips[0]);
+
+  // Real width = clip duration × the timeline scale, so longer clips are wider and can
+  // overflow the viewport (the parent scrolls). 96px tall to match the waveform height.
+  let laneWidth = $derived(clip ? studio.timeToPx(clip.buffer.duration) : 0);
 </script>
 
 <div class="flex border-b border-[var(--color-border)]">
-  <!-- Track header -->
+  <!-- Track header — pinned to the left while the lane scrolls horizontally. -->
   <div
-    class="flex w-44 shrink-0 flex-col gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+    class="sticky left-0 z-20 flex w-44 shrink-0 flex-col gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-3"
   >
     <div class="flex items-center justify-between">
       <span class="text-sm font-medium">{track.name}</span>
@@ -63,14 +67,11 @@
     </div>
   </div>
 
-  <!-- Waveform lane -->
-  <div class="relative flex-1 bg-[var(--color-bg)]">
+  <!-- Waveform lane — real width from clip duration; empty tracks render no prompt
+       (the global empty state owns that message). -->
+  <div class="relative h-24 bg-[var(--color-bg)]" style="width: {laneWidth}px">
     {#if clip}
-      <Waveform buffer={clip.buffer} {color} height={96} />
-    {:else}
-      <div class="grid h-24 place-items-center text-xs text-[var(--color-muted)]">
-        Drop audio here
-      </div>
+      <Waveform buffer={clip.buffer} width={laneWidth} {color} height={96} />
     {/if}
   </div>
 </div>
