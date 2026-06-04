@@ -10,6 +10,12 @@ build/
 # Test / coverage
 coverage/
 
+# Playwright (E2E run artifacts)
+test-results/
+playwright-report/
+playwright/.cache/
+.last-run.json
+
 # Local audio fixtures (binary test assets, kept out of git)
 fixtures/
 

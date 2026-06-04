@@ -1,0 +1,60 @@
+/**
+ * Shared E2E helpers: loading generated audio into the app and locating the timeline
+ * ruler. Keeps the specs focused on the behaviour under test.
+ */
+import { expect, type Page } from '@playwright/test';
+import { writeTempWav, type WavOptions } from './wav.js';
+
+/**
+ * Generate a WAV and load it into the app via the hidden file input (adds a track).
+ * Waits until the new track's waveform lane has rendered — counting lanes rather than
+ * waiting for "a canvas", so loading a second clip doesn't resolve against the first.
+ */
+export async function loadGeneratedClip(page: Page, name: string, opts: WavOptions): Promise<void> {
+  const lanes = page.locator('main div.h-24:has(canvas)');
+  const before = await lanes.count();
+  const path = await writeTempWav(name, opts);
+  await page.locator('input[type=file]').setInputFiles(path);
+  await expect(lanes).toHaveCount(before + 1);
+}
+
+/** Bounding box + backing-store size + a non-blank-pixel count for the ruler canvas. */
+export async function rulerCanvas(page: Page): Promise<{
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  backingWidth: number;
+  nonBlank: number;
+}> {
+  const info = await page.evaluate(() => {
+    const canvases = [...document.querySelectorAll('main canvas')];
+    for (const c of canvases) {
+      const row = c.closest('div.flex');
+      if (row && row.textContent?.includes('Timeline')) {
+        const r = c.getBoundingClientRect();
+        const g = c.getContext('2d')!;
+        let nonBlank = 0;
+        try {
+          const { data } = g.getImageData(0, 0, Math.min(c.width, 2000), c.height);
+          for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) nonBlank++;
+        } catch {
+          /* tainted/oversized — leave nonBlank at 0 */
+        }
+        return { x: r.x, y: r.y, w: r.width, h: r.height, backingWidth: c.width, nonBlank };
+      }
+    }
+    return null;
+  });
+  if (!info) throw new Error('ruler canvas not found');
+  return info;
+}
+
+/** Widths (px) of the track waveform lanes, in DOM order. */
+export function laneWidths(page: Page): Promise<number[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('main div.h-24')]
+      .filter((d) => d.querySelector('canvas'))
+      .map((d) => Math.round(d.getBoundingClientRect().width)),
+  );
+}
