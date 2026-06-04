@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { projectDuration, VERSION } from '@audiosandbox/engine';
   import TimelineRuler from './components/TimelineRuler.svelte';
   import TrackRow from './components/TrackRow.svelte';
@@ -25,6 +26,40 @@
   // Total timeline width in px: project duration at the current scale. Lanes, ruler, and
   // playhead all live in this coordinate space, which may exceed the viewport (→ scroll).
   let contentWidth = $derived(studio.timeToPx(duration));
+
+  // The lane viewport width (scroller minus the pinned header column), used by "Fit".
+  function laneViewportWidth(): number {
+    return scroller ? Math.max(1, scroller.clientWidth - HEADER_W) : 1;
+  }
+
+  function zoomBy(factor: number): void {
+    studio.setZoom(studio.zoom * factor);
+  }
+
+  /** Fit the whole project into the visible lane width. */
+  function fitToWindow(): void {
+    if (duration <= 0) return;
+    const targetPxPerSec = laneViewportWidth() / duration;
+    studio.setZoom(targetPxPerSec / studio.pxPerSec * studio.zoom);
+  }
+
+  // Ctrl/Cmd + wheel zooms, anchored at the cursor: the second under the pointer stays put.
+  function onWheel(e: WheelEvent): void {
+    if (!(e.ctrlKey || e.metaKey)) return; // plain wheel scrolls normally
+    e.preventDefault();
+    if (!scroller) return;
+    const rect = scroller.getBoundingClientRect();
+    // Cursor position within the lane viewport (past the pinned header) and in content space.
+    const cursorViewportX = e.clientX - rect.left - HEADER_W;
+    const tUnder = studio.pxToTime(Math.max(0, cursorViewportX + scroller.scrollLeft));
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    studio.setZoom(studio.zoom * factor);
+    // Keep tUnder under the cursor. Wait for the DOM to grow/shrink to the new content
+    // width first, otherwise the browser clamps scrollLeft to the stale (smaller) range.
+    void tick().then(() => {
+      scroller.scrollLeft = studio.timeToPx(tUnder) - cursorViewportX;
+    });
+  }
 
   function onRulerSeek(seconds: number): void {
     studio.seek(Math.max(0, seconds));
@@ -61,6 +96,40 @@
     <h1 class="text-lg font-semibold tracking-tight">Audio Sandbox</h1>
     <span class="text-sm text-[var(--color-muted)]">Untitled Project</span>
     <div class="ml-auto flex items-center gap-2">
+      <!-- Zoom controls: − / readout / + / Fit -->
+      <div class="flex items-center gap-1 rounded-lg bg-[var(--color-surface-2)] p-0.5">
+        <button
+          class="grid h-7 w-7 place-items-center rounded text-sm transition hover:brightness-125"
+          title="Zoom out"
+          aria-label="Zoom out"
+          onclick={() => zoomBy(0.8)}
+        >
+          −
+        </button>
+        <span
+          class="w-14 text-center text-xs tabular-nums text-[var(--color-muted)]"
+          title="Pixels per second"
+        >
+          {Math.round(studio.pxPerSec)} px/s
+        </span>
+        <button
+          class="grid h-7 w-7 place-items-center rounded text-sm transition hover:brightness-125"
+          title="Zoom in"
+          aria-label="Zoom in"
+          onclick={() => zoomBy(1.25)}
+        >
+          +
+        </button>
+        <button
+          class="rounded px-2 py-1 text-xs transition hover:brightness-125 disabled:opacity-40"
+          title="Fit project to window"
+          aria-label="Fit project to window"
+          disabled={duration === 0}
+          onclick={fitToWindow}
+        >
+          Fit
+        </button>
+      </div>
       <button
         class="rounded-lg bg-[var(--color-surface-2)] px-3 py-1.5 text-sm transition hover:brightness-125"
         onclick={() => studio.addTrack()}
@@ -96,6 +165,7 @@
     }}
     ondragleave={() => (dragging = false)}
     ondrop={onDrop}
+    onwheel={onWheel}
   >
     {#if studio.project.tracks.length === 0}
       <div
