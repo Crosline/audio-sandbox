@@ -12,6 +12,7 @@ import {
   createProject,
   createTrack,
   EngineContext,
+  projectDuration,
   Transport,
   type BufferFactory,
   type Clip,
@@ -173,7 +174,16 @@ export class Studio {
 
   #startPlayheadLoop(): void {
     const tick = (): void => {
-      this.playhead = this.#transport.position;
+      const pos = this.#transport.position;
+      // Stop when playback reaches the end of the project (reset playhead to 0). The
+      // engine's `ended` event is reserved for a future engine-side scheduler; here we
+      // detect it from the derived position, which is what the loop already reads.
+      const end = projectDuration(this.project);
+      if (end > 0 && pos >= end) {
+        this.stop();
+        return; // stop() leaves the `playing` state, so the loop ends here.
+      }
+      this.playhead = pos;
       this.#raf = requestAnimationFrame(tick);
     };
     this.#raf = requestAnimationFrame(tick);
