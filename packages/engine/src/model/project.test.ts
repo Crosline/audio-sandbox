@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { makeMono } from '../test-helpers.js';
 import {
   anyTrackSoloed,
+  clampClipStart,
   createClip,
   createProject,
   createTrack,
@@ -100,5 +101,52 @@ describe('projectDuration', () => {
     const t1 = createTrack('t1', [createClip(oneSecond, 'a', 0)]);
     const t2 = createTrack('t2', [createClip(halfSecond, 'b', 2)]); // ends at 2.5s
     expect(projectDuration({ tracks: [t1, t2] })).toBeCloseTo(2.5, 6);
+  });
+});
+
+describe('clampClipStart', () => {
+  // A 1-second mono clip at sampleRate 8000 → buffer.duration === 1.
+  const oneSec = () => makeMono(new Array(8000).fill(0), 8000);
+
+  it('clamps a negative desired start to 0', () => {
+    const moving = createClip(oneSec(), 'a', 5);
+    const track = createTrack('t', [moving]);
+    expect(clampClipStart(track, moving.id, -3)).toBe(0);
+  });
+
+  it('passes through when there are no other clips (after 0-clamp)', () => {
+    const moving = createClip(oneSec(), 'a', 0);
+    const track = createTrack('t', [moving]);
+    expect(clampClipStart(track, moving.id, 4.2)).toBeCloseTo(4.2);
+  });
+
+  it('butts up against a left neighbor instead of overlapping it', () => {
+    const left = createClip(oneSec(), 'L', 0); // occupies [0,1)
+    const moving = createClip(oneSec(), 'M', 5); // 1s long
+    const track = createTrack('t', [left, moving]);
+    // Wants to start at 0.5 (would overlap [0,1)); nearest non-overlap is 1.0 (right of L).
+    expect(clampClipStart(track, moving.id, 0.5)).toBeCloseTo(1);
+  });
+
+  it('butts up against a right neighbor instead of overlapping it', () => {
+    const right = createClip(oneSec(), 'R', 3); // occupies [3,4)
+    const moving = createClip(oneSec(), 'M', 0); // 1s long
+    const track = createTrack('t', [moving, right]);
+    // Wants 2.8 (interval [2.8,3.8) overlaps [3,4)); nearest non-overlap to the left is 2.0.
+    expect(clampClipStart(track, moving.id, 2.8)).toBeCloseTo(2);
+  });
+
+  it('fits exactly into a gap between two neighbors', () => {
+    const a = createClip(oneSec(), 'A', 0); // [0,1)
+    const c = createClip(oneSec(), 'C', 2); // [2,3)
+    const moving = createClip(oneSec(), 'M', 5); // 1s; the gap [1,2) fits it exactly
+    const track = createTrack('t', [a, c, moving]);
+    expect(clampClipStart(track, moving.id, 1)).toBeCloseTo(1);
+  });
+
+  it('is a no-op for a single-clip track (only the 0-clamp applies)', () => {
+    const moving = createClip(oneSec(), 'M', 0);
+    const track = createTrack('t', [moving]);
+    expect(clampClipStart(track, moving.id, 7)).toBeCloseTo(7);
   });
 });

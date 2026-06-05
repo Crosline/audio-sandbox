@@ -79,3 +79,47 @@ export function projectDuration(project: Pick<Project, 'tracks'>): number {
   }
   return end;
 }
+
+/**
+ * The nearest legal start (seconds) for a clip being moved on its track: never below 0, and
+ * never overlapping another clip on the same track. A dragged clip stops flush against the
+ * neighbor it would otherwise collide with. The moving clip is excluded from the neighbor set.
+ *
+ * Pure (no AudioContext / DOM) so it unit-tests without a browser.
+ */
+export function clampClipStart(track: Track, clipId: Id, desiredStart: number): number {
+  const moving = track.clips.find((c) => c.id === clipId);
+  if (!moving) return Math.max(0, desiredStart);
+  const dur = moving.buffer.duration;
+  const others = track.clips
+    .filter((c) => c.id !== clipId)
+    .map((c) => ({ lo: c.start, hi: c.start + c.buffer.duration }))
+    .sort((a, b) => a.lo - b.lo);
+
+  // Does [s, s+dur) overlap any neighbor? Half-open intervals: touching edges is allowed.
+  const overlaps = (s: number): { lo: number; hi: number } | null => {
+    for (const o of others) {
+      if (s < o.hi && s + dur > o.lo) return o;
+      if (o.lo > s + dur) break; // sorted; no later neighbor can overlap
+    }
+    return null;
+  };
+
+  let s = Math.max(0, desiredStart);
+  // Resolve up to (others + 1) times: each resolution snaps past one blocker.
+  for (let i = 0; i <= others.length; i++) {
+    const hit = overlaps(s);
+    if (!hit) return s;
+    // Snap to the nearer edge of this blocker that the clip actually clears.
+    const leftCandidate = hit.lo - dur; // butt up on the blocker's left
+    const rightCandidate = hit.hi; // butt up on the blocker's right
+    // The left side only fits if it doesn't run past timeline 0. On a distance tie, prefer the
+    // right edge (always valid). A clamped-to-0 left candidate could still overlap, so reject it.
+    const leftFits = leftCandidate >= 0;
+    s =
+      leftFits && Math.abs(leftCandidate - s) < Math.abs(rightCandidate - s)
+        ? leftCandidate
+        : rightCandidate;
+  }
+  return s;
+}

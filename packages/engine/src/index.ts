@@ -26,6 +26,7 @@ export {
 export type { Clip, Id, Project, Track } from './model/types.js';
 export {
   anyTrackSoloed,
+  clampClipStart,
   createClip,
   createId,
   createProject,
