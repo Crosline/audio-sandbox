@@ -85,7 +85,42 @@
   function onDrop(e: DragEvent): void {
     e.preventDefault();
     dragging = false;
-    if (e.dataTransfer?.files?.length) void loadFiles(e.dataTransfer.files);
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+
+    // Which track row is under the drop (if any)?
+    const rows = scroller?.querySelectorAll<HTMLElement>('[data-track-id]') ?? [];
+    let trackId: string | undefined;
+    for (const row of rows) {
+      const r = row.getBoundingClientRect();
+      if (e.clientY >= r.top && e.clientY <= r.bottom) {
+        trackId = row.dataset.trackId;
+        break;
+      }
+    }
+
+    if (trackId && scroller) {
+      const rect = scroller.getBoundingClientRect();
+      const laneX = e.clientX - rect.left - HEADER_W + scroller.scrollLeft;
+      const start = Math.max(0, studio.pxToTime(laneX));
+      void dropFilesAt(files, trackId, start);
+    } else {
+      void loadFiles(files); // off any track → new track at 0 (existing behavior)
+    }
+  }
+
+  /** Place dropped files onto a specific track starting near `start` (each clamped, no overlap). */
+  async function dropFilesAt(files: FileList, trackId: string, start: number): Promise<void> {
+    loadError = null;
+    let at = start;
+    for (const file of Array.from(files)) {
+      try {
+        const clip = await studio.addFile(file, { trackId, start: at });
+        at = clip.start + clip.buffer.duration; // next file butts up after this one
+      } catch (err) {
+        loadError = err instanceof Error ? err.message : String(err);
+      }
+    }
   }
 
   // Editing keyboard shortcuts, scoped to the window. Skip when typing in a field so they
