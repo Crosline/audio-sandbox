@@ -92,6 +92,8 @@ export class Studio {
   readonly #history = new History<ClipSnapshot>(HISTORY_LIMITS);
   /** Cut/copy place the selected slice here; paste reads it. Not reactive. */
   #clipboard: AudioBuffer | null = null;
+  /** The clip currently being drag-moved, so its moves coalesce into one history entry. */
+  #movingClipId: string | null = null;
   /**
    * Absolute timeline second at which a selection-audition should stop, or null when
    * playing the whole project. Read by the RAF loop; set by {@link play}.
@@ -262,23 +264,39 @@ export class Studio {
     this.selectedClip = null;
   }
 
-  /** Move a clip to a new start offset (clamped ≥0, no overlap on its track). Undoable. */
+  /**
+   * Move a clip to a new start offset (clamped ≥0, no overlap on its track). Undoable.
+   *
+   * A drag fires this many times per gesture; we coalesce them into ONE history entry so a
+   * single undo restores the pre-drag position. The first call of a gesture pushes the old
+   * start; subsequent calls for the same clip just reposition. {@link endClipMove} closes the
+   * gesture so the next move starts a fresh entry.
+   */
   moveClip(trackId: string, clipId: string, desiredStart: number): void {
     const found = this.#findClip(trackId, clipId);
     if (!found) return;
     const { track, clip } = found;
     const next = clampClipStart(track, clipId, desiredStart);
     if (next === clip.start) return; // no-op — don't pollute history
-    this.#history.push(
-      'Move clip',
-      { trackId, clipId, buffer: clip.buffer, start: clip.start },
-      bufferBytes(clip.buffer),
-    );
+    const continuingDrag = this.#movingClipId === clipId;
+    if (!continuingDrag) {
+      this.#history.push(
+        'Move clip',
+        { trackId, clipId, buffer: clip.buffer, start: clip.start },
+        bufferBytes(clip.buffer),
+      );
+      this.#movingClipId = clipId;
+    }
     this.updateTrack({
       ...track,
       clips: track.clips.map((c) => (c.id === clipId ? { ...c, start: next } : c)),
     });
     this.#refreshHistoryFlags();
+  }
+
+  /** End a drag-move gesture so the next {@link moveClip} opens a fresh, separately-undoable entry. */
+  endClipMove(): void {
+    this.#movingClipId = null;
   }
 
   /**

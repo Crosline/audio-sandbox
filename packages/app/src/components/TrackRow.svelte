@@ -95,6 +95,7 @@
       // Click on a clip → select it as an object.
       studio.selectClip(track.id, pressClipId);
     }
+    studio.endClipMove(); // close any drag-move gesture so its undo is one step
     dragging = false;
     pressClipId = null;
   }

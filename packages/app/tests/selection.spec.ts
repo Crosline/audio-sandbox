@@ -42,23 +42,24 @@ test.describe('selection + editing', () => {
     await expect(page.getByTestId('selection-readout')).toContainText('Sel');
   });
 
-  test('clicking a lane seeks and clears the selection', async ({ page }) => {
+  test('clicking a clip object-selects it and clears the range selection', async ({ page }) => {
     await page.goto('/');
     await loadGeneratedClip(page, 'clip.wav', { seconds: 4 });
 
     await dragSelect(page, 0.25, 0.6);
     expect(await selection(page)).not.toBeNull();
 
-    // A plain click (no drag) seeks and clears.
+    // A plain click (no drag) on the clip now object-selects it (the Step 8b interaction model)
+    // and clears the time-range selection. Seeking is reserved for the empty lane background.
     const box = (await lane(page).boundingBox())!;
     await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
     expect(await selection(page)).toBeNull();
     await expect(page.getByTestId('selection-readout')).toContainText('No selection');
 
-    const playhead = await page.evaluate(
-      () => (window as unknown as { __studio: { playhead: number } }).__studio.playhead,
+    const selectedClip = await page.evaluate(
+      () => (window as unknown as { __studio: { selectedClip: unknown } }).__studio.selectedClip,
     );
-    expect(playhead).toBeGreaterThan(0); // ~2s (50% of 4s)
+    expect(selectedClip).not.toBeNull();
   });
 
   test('Cut shortens the clip; Undo restores it; Redo re-applies', async ({ page }) => {
