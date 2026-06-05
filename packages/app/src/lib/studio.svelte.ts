@@ -7,6 +7,7 @@
  * Svelte-side embodiment of the engine/app boundary.
  */
 import {
+  clampClipStart,
   copySeconds,
   createClip,
   createContextFactory,
@@ -38,11 +39,13 @@ export interface Selection {
   end: number;
 }
 
-/** An undo snapshot: a clip's prior buffer plus where it lives, so undo can restore it. */
+/** An undo snapshot: a clip's prior buffer and (for moves) prior start, so undo can restore it. */
 interface ClipSnapshot {
   trackId: string;
   clipId: string;
   buffer: AudioBuffer;
+  /** Clip start at snapshot time. Present for move edits; restored on undo/redo. */
+  start?: number;
 }
 
 /** Rough byte size of an AudioBuffer (Float32 samples), for the history budget. */
@@ -77,6 +80,8 @@ export class Studio {
 
   /** The current time-range selection, or null. Drives the highlight and edit enablement. */
   selection = $state<Selection | null>(null);
+  /** A clip selected *as an object* (for move), distinct from the time-range `selection`. */
+  selectedClip = $state<{ trackId: string; clipId: string } | null>(null);
   /** Mirrors of the history flags so buttons react. Refreshed after every edit/undo/redo. */
   canUndo = $state(false);
   canRedo = $state(false);
@@ -212,6 +217,20 @@ export class Studio {
     });
   }
 
+  /** Apply a restored snapshot: swap the buffer, and the start too if the snapshot carried one. */
+  #restoreSnapshot(s: ClipSnapshot): void {
+    const track = this.project.tracks.find((t) => t.id === s.trackId);
+    if (!track) return;
+    this.updateTrack({
+      ...track,
+      clips: track.clips.map((c) =>
+        c.id === s.clipId
+          ? { ...c, buffer: s.buffer, ...(s.start !== undefined ? { start: s.start } : {}) }
+          : c,
+      ),
+    });
+  }
+
   /** Set (or clear) the selection, clamping its range to the target clip's duration. */
   setSelection(sel: Selection | null): void {
     if (!sel) {
@@ -224,11 +243,42 @@ export class Studio {
     const start = Math.max(0, Math.min(sel.start, sel.end));
     const end = Math.min(dur, Math.max(sel.start, sel.end));
     this.selection = { ...sel, start, end };
+    this.selectedClip = null;
   }
 
   clearSelection(): void {
     this.selection = null;
     this.#playRangeEnd = null;
+  }
+
+  /** Select a clip as an object (for moving). Mutually exclusive with the time-range selection. */
+  selectClip(trackId: string, clipId: string): void {
+    this.clearSelection();
+    this.selectedClip = { trackId, clipId };
+  }
+
+  /** Clear the object-selection (e.g. when a range-select or seek takes over). */
+  clearSelectedClip(): void {
+    this.selectedClip = null;
+  }
+
+  /** Move a clip to a new start offset (clamped ≥0, no overlap on its track). Undoable. */
+  moveClip(trackId: string, clipId: string, desiredStart: number): void {
+    const found = this.#findClip(trackId, clipId);
+    if (!found) return;
+    const { track, clip } = found;
+    const next = clampClipStart(track, clipId, desiredStart);
+    if (next === clip.start) return; // no-op — don't pollute history
+    this.#history.push(
+      'Move clip',
+      { trackId, clipId, buffer: clip.buffer, start: clip.start },
+      bufferBytes(clip.buffer),
+    );
+    this.updateTrack({
+      ...track,
+      clips: track.clips.map((c) => (c.id === clipId ? { ...c, start: next } : c)),
+    });
+    this.#refreshHistoryFlags();
   }
 
   /**
@@ -306,24 +356,18 @@ export class Studio {
   undo(): void {
     const target = this.#historyTargetClip();
     if (!target) return;
-    const restored = this.#history.undo(
-      { trackId: target.trackId, clipId: target.clipId, buffer: target.buffer },
-      bufferBytes(target.buffer),
-    );
+    const restored = this.#history.undo(target, bufferBytes(target.buffer));
     if (!restored) return;
-    this.#replaceClipBuffer(restored.state.trackId, restored.state.clipId, restored.state.buffer);
+    this.#restoreSnapshot(restored.state);
     this.#refreshHistoryFlags();
   }
 
   redo(): void {
     const target = this.#historyTargetClip();
     if (!target) return;
-    const restored = this.#history.redo(
-      { trackId: target.trackId, clipId: target.clipId, buffer: target.buffer },
-      bufferBytes(target.buffer),
-    );
+    const restored = this.#history.redo(target, bufferBytes(target.buffer));
     if (!restored) return;
-    this.#replaceClipBuffer(restored.state.trackId, restored.state.clipId, restored.state.buffer);
+    this.#restoreSnapshot(restored.state);
     this.#refreshHistoryFlags();
   }
 
@@ -333,15 +377,21 @@ export class Studio {
    * Prefer the selected clip, else the first clip of the first track (single-clip-per-track
    * in v1).
    */
-  #historyTargetClip(): { trackId: string; clipId: string; buffer: AudioBuffer } | undefined {
+  #historyTargetClip(): ClipSnapshot | undefined {
     const sel = this.selection;
     if (sel) {
       const found = this.#findClip(sel.trackId, sel.clipId);
-      if (found) return { trackId: sel.trackId, clipId: sel.clipId, buffer: found.clip.buffer };
+      if (found)
+        return {
+          trackId: sel.trackId,
+          clipId: sel.clipId,
+          buffer: found.clip.buffer,
+          start: found.clip.start,
+        };
     }
     for (const track of this.project.tracks) {
       const clip = track.clips[0];
-      if (clip) return { trackId: track.id, clipId: clip.id, buffer: clip.buffer };
+      if (clip) return { trackId: track.id, clipId: clip.id, buffer: clip.buffer, start: clip.start };
     }
     return undefined;
   }
@@ -360,20 +410,26 @@ export class Studio {
    * Decode an audio file and append it as a new clip on a track (creating a track if none
    * is given). Returns the new clip.
    */
-  async addFile(file: File, trackId?: string): Promise<Clip> {
+  async addFile(file: File, opts?: { trackId?: string; start?: number }): Promise<Clip> {
     const arrayBuffer = await file.arrayBuffer();
     // decodeAudioData detaches the ArrayBuffer; slice() hands it a private copy.
     const audio = await this.#engine.context.decodeAudioData(arrayBuffer.slice(0));
     if (audio.length === 0) throw new Error(`"${file.name}" decoded to an empty buffer`);
 
-    const clip = createClip(audio, file.name, 0);
-    let target = trackId
-      ? this.project.tracks.find((t) => t.id === trackId)
+    let target = opts?.trackId
+      ? this.project.tracks.find((t) => t.id === opts.trackId)
       : undefined;
     if (!target) target = this.addTrack();
 
-    this.updateTrack({ ...target, clips: [...target.clips, clip] });
-    return clip;
+    // Build the clip, then clamp its start so it never overlaps existing clips on the track.
+    const clip = createClip(audio, file.name, opts?.start ?? 0);
+    const withClip = { ...target, clips: [...target.clips, clip] };
+    const start = clampClipStart(withClip, clip.id, opts?.start ?? 0);
+    this.updateTrack({
+      ...withClip,
+      clips: withClip.clips.map((c) => (c.id === clip.id ? { ...c, start } : c)),
+    });
+    return { ...clip, start };
   }
 
   // ---- transport ----
@@ -405,6 +461,7 @@ export class Studio {
     this.#transport.seek(seconds);
     this.playhead = seconds;
     this.#playRangeEnd = null;
+    this.selectedClip = null;
   }
 
   /** Read a track's live gain-node value (for verification / E2E). Undefined if unwired. */
