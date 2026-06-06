@@ -16,6 +16,19 @@ export function createClip(buffer: AudioBuffer, name: string, start = 0): Clip {
   return { id: createId(), buffer, name, start };
 }
 
+/** Smallest visible/audible clip length (seconds) a resize may leave. */
+export const MIN_CLIP_DURATION = 0.02;
+
+/** A clip's visible/audible length on the timeline, honoring non-destructive trim. */
+export function clipDuration(clip: Pick<Clip, 'buffer' | 'trimStart' | 'trimEnd'>): number {
+  return clip.buffer.duration - (clip.trimStart ?? 0) - (clip.trimEnd ?? 0);
+}
+
+/** A clip's end position on the timeline: start + visible duration. */
+export function clipEnd(clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'trimEnd'>): number {
+  return clip.start + clipDuration(clip);
+}
+
 export function createTrack(name: string, clips: Clip[] = []): Track {
   return {
     id: createId(),

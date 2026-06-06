@@ -27,12 +27,15 @@ export type { Clip, Id, Project, Track } from './model/types.js';
 export {
   anyTrackSoloed,
   clampClipStart,
+  clipDuration,
+  clipEnd,
   createClip,
   createId,
   createProject,
   createTrack,
   DEFAULT_GAIN,
   isTrackAudible,
+  MIN_CLIP_DURATION,
   projectDuration,
   trackTargetGain,
 } from './model/project.js';

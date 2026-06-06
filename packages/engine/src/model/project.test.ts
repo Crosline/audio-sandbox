@@ -3,6 +3,8 @@ import { makeMono } from '../test-helpers.js';
 import {
   anyTrackSoloed,
   clampClipStart,
+  clipDuration,
+  clipEnd,
   createClip,
   createProject,
   createTrack,
@@ -148,5 +150,21 @@ describe('clampClipStart', () => {
     const moving = createClip(oneSec(), 'M', 0);
     const track = createTrack('t', [moving]);
     expect(clampClipStart(track, moving.id, 7)).toBeCloseTo(7);
+  });
+});
+
+describe('clipDuration / clipEnd', () => {
+  const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s mono buffer
+
+  it('untrimmed clip has the full buffer duration', () => {
+    const clip = createClip(buf(), 'a', 2);
+    expect(clipDuration(clip)).toBeCloseTo(1);
+    expect(clipEnd(clip)).toBeCloseTo(3);
+  });
+
+  it('subtracts head and tail trim', () => {
+    const clip = { ...createClip(buf(), 'a', 2), trimStart: 0.25, trimEnd: 0.1 };
+    expect(clipDuration(clip)).toBeCloseTo(0.65);
+    expect(clipEnd(clip)).toBeCloseTo(2.65);
   });
 });
