@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeMono } from '../test-helpers.js';
+import { makeMono, makeStereo } from '../test-helpers.js';
 import { encodeWav } from './wav.js';
 
 /** Read a 4-char ASCII tag at a byte offset. */
@@ -33,5 +33,46 @@ describe('encodeWav — int16 mono header', () => {
     expect(view.getUint16(34, true)).toBe(16); // bitsPerSample
     expect(tag(view, 36)).toBe('data');
     expect(view.getUint32(40, true)).toBe(8); // data size
+  });
+});
+
+describe('encodeWav — sample values', () => {
+  it('encodes int16 full-scale, negative, zero, and clamps out-of-range', () => {
+    const buf = makeMono([1, -1, 0, 2, -2], 8000);
+    const view = new DataView(encodeWav(buf));
+    // Samples start at byte 44; int16 little-endian.
+    expect(view.getInt16(44, true)).toBe(0x7fff); // +1.0
+    expect(view.getInt16(46, true)).toBe(-0x8000); // -1.0 → 0x8000
+    expect(view.getInt16(48, true)).toBe(0); // 0
+    expect(view.getInt16(50, true)).toBe(0x7fff); // +2.0 clamps to +1.0
+    expect(view.getInt16(52, true)).toBe(-0x8000); // -2.0 clamps to -1.0
+  });
+
+  it('interleaves stereo as L,R,L,R', () => {
+    const buf = makeStereo([1, 0], [-1, 0], 8000);
+    const view = new DataView(encodeWav(buf));
+    expect(view.getInt16(44, true)).toBe(0x7fff); // L[0] = +1
+    expect(view.getInt16(46, true)).toBe(-0x8000); // R[0] = -1
+    expect(view.getInt16(48, true)).toBe(0); // L[1] = 0
+    expect(view.getInt16(50, true)).toBe(0); // R[1] = 0
+  });
+
+  it('round-trips float32 bit-exact', () => {
+    const buf = makeMono([0.25, -0.5, 1, -1], 8000);
+    const view = new DataView(encodeWav(buf, { format: 'float32' }));
+    expect(view.getUint16(20, true)).toBe(3); // AudioFormat = 3 (float)
+    expect(view.getUint16(34, true)).toBe(32); // bitsPerSample
+    expect(view.getFloat32(44, true)).toBe(0.25);
+    expect(view.getFloat32(48, true)).toBe(-0.5);
+    expect(view.getFloat32(52, true)).toBe(1);
+    expect(view.getFloat32(56, true)).toBe(-1);
+  });
+
+  it('encodes an empty buffer as a header with zero data', () => {
+    const buf = makeMono([], 8000);
+    const bytes = encodeWav(buf);
+    const view = new DataView(bytes);
+    expect(bytes.byteLength).toBe(44);
+    expect(view.getUint32(40, true)).toBe(0); // data size
   });
 });
