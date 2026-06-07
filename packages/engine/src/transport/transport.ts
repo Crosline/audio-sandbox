@@ -10,7 +10,7 @@
  */
 import { Emitter } from '../core/emitter.js';
 import type { EngineContext } from '../core/engine-context.js';
-import { anyTrackSoloed, trackTargetGain } from '../model/project.js';
+import { anyTrackSoloed, clipDuration, clipEnd, trackTargetGain } from '../model/project.js';
 import type { Project } from '../model/types.js';
 import {
   clampSeek,
@@ -82,7 +82,7 @@ export class Transport {
   #duration(): number {
     let end = 0;
     for (const track of this.#getProject().tracks) {
-      for (const clip of track.clips) end = Math.max(end, clip.start + clip.buffer.duration);
+      for (const clip of track.clips) end = Math.max(end, clipEnd(clip));
     }
     return end;
   }
@@ -136,20 +136,23 @@ export class Transport {
       // is what lets mute/solo/volume changes take effect mid-playback.
       const trackGain = this.#trackGain(track.id);
       for (const clip of track.clips) {
+        const trimStart = clip.trimStart ?? 0;
+        const visible = clipDuration(clip);
         const clipStart = clip.start;
-        const clipEnd = clip.start + clip.buffer.duration;
-        if (clipEnd <= fromPosition) continue; // already past this clip
+        const clipEndPos = clipStart + visible;
+        if (clipEndPos <= fromPosition) continue; // already past this clip
 
         const node = ctx.createBufferSource();
         node.buffer = clip.buffer;
         node.connect(trackGain);
 
         if (fromPosition <= clipStart) {
-          // Clip begins in the future: start it after the lead-in delay.
-          node.start(startClock + (clipStart - fromPosition));
+          // Clip begins in the future: start after the lead-in, read the trimmed window.
+          node.start(startClock + (clipStart - fromPosition), trimStart, visible);
         } else {
-          // Playhead is inside the clip: start now, offset into the buffer.
-          node.start(startClock, fromPosition - clipStart);
+          // Playhead is inside the clip: start now, offset past the head trim + elapsed.
+          const into = fromPosition - clipStart;
+          node.start(startClock, trimStart + into, visible - into);
         }
         this.#sources.push({ node });
       }
