@@ -159,7 +159,7 @@
 <div class="flex border-b border-[var(--color-border)]" data-track-id={track.id}>
   <!-- Track header — pinned to the left while the lane scrolls horizontally. -->
   <div
-    class="sticky left-0 z-20 flex w-44 shrink-0 flex-col gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+    class="sticky left-0 z-20 flex w-44 shrink-0 flex-col gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-3 group"
   >
     <div class="flex items-center justify-between">
       <span class="text-sm font-medium">{track.name}</span>
@@ -183,6 +183,15 @@
           onclick={() => studio.toggleSolo(track.id)}
         >
           S
+        </button>
+        <button
+          class="grid h-6 w-6 place-items-center rounded text-xs font-semibold opacity-0 transition group-hover:opacity-100 bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-accent-2)]"
+          title="Delete track"
+          aria-label="Delete track"
+          data-testid="delete-track"
+          onclick={() => studio.removeTrack(track.id)}
+        >
+          ✕
         </button>
       </div>
     </div>
