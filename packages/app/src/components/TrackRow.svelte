@@ -70,8 +70,11 @@
     if (!dragging && Math.abs(x - pressX) < DRAG_THRESHOLD) return;
     dragging = true;
     if (pressWasSelected) {
-      // Drag-move the already-selected clip: keep the grab point under the cursor.
-      studio.moveClip(track.id, pressClipId, studio.pxToTime(x - grabInClip));
+      if (!studio.clipDrag) {
+        studio.clipDrag = { fromTrackId: track.id, clipId: pressClipId, grabInClipPx: grabInClip };
+      }
+      // App's window listener positions the clip (it knows the row under the pointer).
+      return;
     } else {
       // Drag on a not-yet-object-selected clip → time-range select on that clip.
       const clip = track.clips.find((c) => c.id === pressClipId);
@@ -88,6 +91,7 @@
   }
 
   function onPointerUp(e: PointerEvent): void {
+    if (studio.clipDrag) { pointerDown = false; dragging = false; pressClipId = null; return; }
     if (resizing) { onResizeUp(e); return; }
     if (!pointerDown) return;
     pointerDown = false;
