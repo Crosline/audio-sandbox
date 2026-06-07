@@ -3,12 +3,16 @@ import { makeMono } from '../test-helpers.js';
 import {
   anyTrackSoloed,
   clampClipStart,
+  clipDuration,
+  clipEnd,
   createClip,
   createProject,
   createTrack,
   DEFAULT_GAIN,
   isTrackAudible,
+  MIN_CLIP_DURATION,
   projectDuration,
+  resizeClip,
   trackTargetGain,
 } from './project.js';
 
@@ -102,6 +106,13 @@ describe('projectDuration', () => {
     const t2 = createTrack('t2', [createClip(halfSecond, 'b', 2)]); // ends at 2.5s
     expect(projectDuration({ tracks: [t1, t2] })).toBeCloseTo(2.5, 6);
   });
+
+  it('respects trim when computing the latest end', () => {
+    const buf = makeMono(new Array(8000).fill(0), 8000); // 1.0s
+    const trimmed = { ...createClip(buf, 'a', 2), trimEnd: 0.4 }; // visible end = 2.6
+    const track = createTrack('t1', [trimmed]);
+    expect(projectDuration({ tracks: [track] })).toBeCloseTo(2.6);
+  });
 });
 
 describe('clampClipStart', () => {
@@ -148,5 +159,88 @@ describe('clampClipStart', () => {
     const moving = createClip(oneSec(), 'M', 0);
     const track = createTrack('t', [moving]);
     expect(clampClipStart(track, moving.id, 7)).toBeCloseTo(7);
+  });
+});
+
+describe('clipDuration / clipEnd', () => {
+  const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s mono buffer
+
+  it('untrimmed clip has the full buffer duration', () => {
+    const clip = createClip(buf(), 'a', 2);
+    expect(clipDuration(clip)).toBeCloseTo(1);
+    expect(clipEnd(clip)).toBeCloseTo(3);
+  });
+
+  it('subtracts head and tail trim', () => {
+    const clip = { ...createClip(buf(), 'a', 2), trimStart: 0.25, trimEnd: 0.1 };
+    expect(clipDuration(clip)).toBeCloseTo(0.65);
+    expect(clipEnd(clip)).toBeCloseTo(2.65);
+  });
+});
+
+describe('clampClipStart respects trim (visible duration)', () => {
+  const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s
+
+  it('a half-trimmed (0.5s) moving clip fits in a 0.5s gap', () => {
+    const left = createClip(buf(), 'L', 0); // occupies [0,1)
+    const right = createClip(buf(), 'R', 1.5); // occupies [1.5,2.5)
+    // moving clip is 1s buffer but trimmed to 0.5s visible
+    const moving = { ...createClip(buf(), 'M', 5), trimEnd: 0.5 };
+    const track = createTrack('t', [left, moving, right]);
+    // The [1.0,1.5) gap is exactly 0.5s — the trimmed clip fits flush at 1.0.
+    expect(clampClipStart(track, moving.id, 1.0)).toBeCloseTo(1.0);
+  });
+
+  it('a trimmed neighbor occupies only its visible length, leaving more room', () => {
+    const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s
+    // neighbor has 1s buffer but trimEnd=0.5 → visible end at 0.5
+    const left = { ...createClip(buf(), 'L', 0), trimEnd: 0.5 }; // visible [0, 0.5)
+    // moving is 0.6s visible
+    const moving = { ...createClip(buf(), 'M', 5), trimEnd: 0.4 };
+    const track = createTrack('t', [left, moving]);
+    // gap starts at 0.5 (trimmed neighbor end); moving 0.6s clip fits at 0.5
+    expect(clampClipStart(track, moving.id, 0.5)).toBeCloseTo(0.5);
+    // if the neighbor were treated as 1.0s, the moving clip would need to start at 1.0
+    // — the test would fail there, proving the neighbor trim is honored
+  });
+});
+
+describe('resizeClip', () => {
+  const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s
+
+  it('right edge: sets trimEnd, leaves start and trimStart', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'right', 0.3); // hide 0.3s of the tail
+    expect(r.start).toBeCloseTo(2);
+    expect(r.trimStart).toBeCloseTo(0);
+    expect(r.trimEnd).toBeCloseTo(0.3);
+  });
+
+  it('left edge: trimStart and start move together by the same delta', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'left', 0.4); // hide 0.4s of the head
+    expect(r.trimStart).toBeCloseTo(0.4);
+    expect(r.start).toBeCloseTo(2.4); // left face moves right; audio under kept region stays put
+    expect(r.trimEnd).toBeCloseTo(0);
+  });
+
+  it('clamps so visible duration never drops below MIN_CLIP_DURATION', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'right', 5); // absurd over-trim on a 1s clip
+    expect(clipDuration({ ...clip, ...r })).toBeCloseTo(MIN_CLIP_DURATION);
+  });
+
+  it('clamps negative trim (growing past the buffer edge) to 0', () => {
+    const clip = { ...createClip(buf(), 'a', 2), trimEnd: 0.3 };
+    const r = resizeClip(clip, 'right', -1); // pull the right edge back out fully
+    expect(r.trimEnd).toBeCloseTo(0);
+  });
+
+  it('left edge clamp also keeps start consistent', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'left', 5); // over-trim from the left
+    expect(clipDuration({ ...clip, ...r })).toBeCloseTo(MIN_CLIP_DURATION);
+    // start moved right by exactly the applied trimStart
+    expect(r.start - 2).toBeCloseTo(r.trimStart);
   });
 });

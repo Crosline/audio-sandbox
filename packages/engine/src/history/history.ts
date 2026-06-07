@@ -77,6 +77,12 @@ export class History<S> {
     return { state: entry.state, label: entry.label };
   }
 
+  /** Look at the top undo entry (state + label) without removing it, or null if empty. */
+  peek(): { state: S; label: string } | null {
+    const entry = this.#undo[this.#undo.length - 1];
+    return entry ? { state: entry.state, label: entry.label } : null;
+  }
+
   /** Drop all history. */
   clear(): void {
     this.#undo = [];

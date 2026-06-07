@@ -16,6 +16,54 @@ export function createClip(buffer: AudioBuffer, name: string, start = 0): Clip {
   return { id: createId(), buffer, name, start };
 }
 
+/** Smallest visible/audible clip length (seconds) a resize may leave. */
+export const MIN_CLIP_DURATION = 0.02;
+
+/** A clip's visible/audible length on the timeline, honoring non-destructive trim. */
+export function clipDuration(clip: Pick<Clip, 'buffer' | 'trimStart' | 'trimEnd'>): number {
+  return clip.buffer.duration - (clip.trimStart ?? 0) - (clip.trimEnd ?? 0);
+}
+
+/** A clip's end position on the timeline: start + visible duration. */
+export function clipEnd(clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'trimEnd'>): number {
+  return clip.start + clipDuration(clip);
+}
+
+/**
+ * Geometry for a non-destructive edge resize. `desiredTrim` is the target trim amount
+ * (seconds) measured from the named edge of the buffer; negative means grow the clip back
+ * out toward the buffer's natural edge. Returns the clip's new `start`/`trimStart`/`trimEnd`.
+ *
+ * - Right edge: only `trimEnd` changes; `start` and `trimStart` are untouched.
+ * - Left edge: `trimStart` changes AND `start` moves by the same delta, so the audio under
+ *   the kept region stays fixed on the timeline (the clip's left face slides, the audio does
+ *   not).
+ *
+ * Trims are clamped to `[0, buffer.duration - opposite - MIN_CLIP_DURATION]` so the clip
+ * never inverts and visible duration stays >= MIN_CLIP_DURATION. Overlap with neighbors is
+ * NOT considered here — the caller applies that separately.
+ */
+export function resizeClip(
+  clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'trimEnd'>,
+  edge: 'left' | 'right',
+  desiredTrim: number,
+): { start: number; trimStart: number; trimEnd: number } {
+  const total = clip.buffer.duration;
+  const curStart = clip.trimStart ?? 0;
+  const curEnd = clip.trimEnd ?? 0;
+
+  if (edge === 'right') {
+    const maxEnd = Math.max(0, total - curStart - MIN_CLIP_DURATION);
+    const trimEnd = Math.min(Math.max(0, desiredTrim), maxEnd);
+    return { start: clip.start, trimStart: curStart, trimEnd };
+  }
+  // left edge
+  const maxStart = Math.max(0, total - curEnd - MIN_CLIP_DURATION);
+  const trimStart = Math.min(Math.max(0, desiredTrim), maxStart);
+  const delta = trimStart - curStart; // how much the left face moved
+  return { start: clip.start + delta, trimStart, trimEnd: curEnd };
+}
+
 export function createTrack(name: string, clips: Clip[] = []): Track {
   return {
     id: createId(),
@@ -74,7 +122,7 @@ export function projectDuration(project: Pick<Project, 'tracks'>): number {
   let end = 0;
   for (const track of project.tracks) {
     for (const clip of track.clips) {
-      end = Math.max(end, clip.start + clip.buffer.duration);
+      end = Math.max(end, clipEnd(clip));
     }
   }
   return end;
@@ -90,10 +138,10 @@ export function projectDuration(project: Pick<Project, 'tracks'>): number {
 export function clampClipStart(track: Track, clipId: Id, desiredStart: number): number {
   const moving = track.clips.find((c) => c.id === clipId);
   if (!moving) return Math.max(0, desiredStart);
-  const dur = moving.buffer.duration;
+  const dur = clipDuration(moving);
   const others = track.clips
     .filter((c) => c.id !== clipId)
-    .map((c) => ({ lo: c.start, hi: c.start + c.buffer.duration }))
+    .map((c) => ({ lo: c.start, hi: clipEnd(c) }))
     .sort((a, b) => a.lo - b.lo);
 
   // Does [s, s+dur) overlap any neighbor? Half-open intervals: touching edges is allowed.

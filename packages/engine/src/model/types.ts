@@ -23,6 +23,10 @@ export interface Clip {
   start: number;
   /** Display name (e.g. the source filename). */
   name: string;
+  /** Seconds of the buffer's HEAD to skip (non-destructive left trim). Default 0. */
+  trimStart?: number;
+  /** Seconds of the buffer's TAIL to skip (non-destructive right trim). Default 0. */
+  trimEnd?: number;
 }
 
 /** A track: an ordered lane of clips plus its mixer state. */
