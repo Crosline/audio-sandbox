@@ -42,6 +42,9 @@ export function clipEnd(clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'tri
  * Trims are clamped to `[0, buffer.duration - opposite - MIN_CLIP_DURATION]` so the clip
  * never inverts and visible duration stays >= MIN_CLIP_DURATION. Overlap with neighbors is
  * NOT considered here — the caller applies that separately.
+ *
+ * The returned `start` may be negative when growing a left-trimmed clip near the timeline
+ * origin; the caller must clamp to >= 0 after applying neighbor-overlap constraints.
  */
 export function resizeClip(
   clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'trimEnd'>,

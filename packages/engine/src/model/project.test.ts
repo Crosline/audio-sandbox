@@ -243,4 +243,11 @@ describe('resizeClip', () => {
     // start moved right by exactly the applied trimStart
     expect(r.start - 2).toBeCloseTo(r.trimStart);
   });
+
+  it('left edge grow: start can go negative for a clip near origin; caller clamps', () => {
+    const clip = { ...createClip(buf(), 'a', 0.1), trimStart: 0.2 };
+    const r = resizeClip(clip, 'left', 0); // grow back to buffer origin
+    expect(r.trimStart).toBeCloseTo(0);
+    expect(r.start).toBeCloseTo(-0.1); // negative — caller responsibility to clamp
+  });
 });
