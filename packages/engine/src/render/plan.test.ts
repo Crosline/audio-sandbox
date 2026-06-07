@@ -55,6 +55,21 @@ describe('resolveRenderPlan — window + scheduling', () => {
     expect(plan.tracks).toHaveLength(1);
     expect(plan.tracks[0]!.clips).toHaveLength(0);
   });
+
+  it('honors trimStart/trimEnd: visible duration shrinks and buffer offset is shifted', () => {
+    // 1s buffer, 0.25s trimmed from each end → 0.5s visible, starting at t=0 on timeline.
+    const clip = { ...createClip(oneSec(), 'a', 0), trimStart: 0.25, trimEnd: 0.25 };
+    const project = createProject('p', [createTrack('T1', [clip as never])]);
+    const plan = resolveRenderPlan(project);
+
+    // Project duration must reflect the trimmed (visible) length, not the full buffer.
+    // (projectDuration itself doesn't know about trim until that model lands; what we CAN
+    //  assert is the scheduled clip geometry, which is purely plan.ts's responsibility.)
+    const sched = plan.tracks[0]!.clips[0]!;
+    expect(sched.when).toBe(0); // starts at window origin
+    expect(sched.offset).toBeCloseTo(0.25); // buffer read starts at the trimStart position
+    expect(sched.duration).toBeCloseTo(0.5); // only the visible 0.5s is played
+  });
 });
 
 /** A track with one full-window 1s clip and explicit mixer state. */

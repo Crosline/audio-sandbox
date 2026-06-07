@@ -69,19 +69,23 @@ function inferSampleRate(project: Project): number {
 
 /** Schedule a single clip into [start, end), or null if it doesn't intersect the window. */
 function scheduleClip(
-  clipStart: number,
-  buffer: AudioBuffer,
+  clip: { buffer: AudioBuffer; start: number; trimStart?: number; trimEnd?: number },
   start: number,
   end: number,
 ): ScheduledClip | null {
-  const clipEnd = clipStart + buffer.duration;
+  const trimStart = clip.trimStart ?? 0;
+  const trimEnd = clip.trimEnd ?? 0;
+  const visible = clip.buffer.duration - trimStart - trimEnd;
+  const clipStart = clip.start;
+  const clipEndPos = clipStart + visible;
   const from = Math.max(clipStart, start);
-  const to = Math.min(clipEnd, end);
+  const to = Math.min(clipEndPos, end);
   if (to <= from) return null; // no overlap with the window
+  const into = from - clipStart; // elapsed within the visible window
   return {
-    buffer,
+    buffer: clip.buffer,
     when: from - start, // window-relative start
-    offset: from - clipStart, // skip into the buffer if the window starts mid-clip
+    offset: trimStart + into, // head-trim + elapsed, so we read the correct buffer region
     duration: to - from,
   };
 }
@@ -109,7 +113,7 @@ export function resolveRenderPlan(
     if (gain === null) continue; // not included in this render
     const clips: ScheduledClip[] = [];
     for (const clip of track.clips) {
-      const sched = scheduleClip(clip.start, clip.buffer, start, end);
+      const sched = scheduleClip(clip, start, end);
       if (sched) clips.push(sched);
     }
     tracks.push({ trackId: track.id, gain, clips });
