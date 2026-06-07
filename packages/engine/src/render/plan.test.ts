@@ -62,13 +62,58 @@ describe('resolveRenderPlan — window + scheduling', () => {
     const project = createProject('p', [createTrack('T1', [clip as never])]);
     const plan = resolveRenderPlan(project);
 
-    // Project duration must reflect the trimmed (visible) length, not the full buffer.
-    // (projectDuration itself doesn't know about trim until that model lands; what we CAN
-    //  assert is the scheduled clip geometry, which is purely plan.ts's responsibility.)
     const sched = plan.tracks[0]!.clips[0]!;
     expect(sched.when).toBe(0); // starts at window origin
     expect(sched.offset).toBeCloseTo(0.25); // buffer read starts at the trimStart position
     expect(sched.duration).toBeCloseTo(0.5); // only the visible 0.5s is played
+  });
+
+  it('trimStart only: offset shifts but tail is unaffected', () => {
+    // 1s buffer, 0.3s head trimmed → 0.7s visible. No tail trim so trimEnd=0.
+    const clip = { ...createClip(oneSec(), 'a', 0), trimStart: 0.3 };
+    const project = createProject('p', [createTrack('T1', [clip as never])]);
+    const plan = resolveRenderPlan(project);
+
+    const sched = plan.tracks[0]!.clips[0]!;
+    expect(sched.offset).toBeCloseTo(0.3);
+    expect(sched.duration).toBeCloseTo(0.7);
+  });
+
+  it('trimEnd only: tail is cut but offset stays at buffer start', () => {
+    // 1s buffer, 0.4s tail trimmed → 0.6s visible. trimStart=0 so offset must be 0.
+    const clip = { ...createClip(oneSec(), 'a', 0), trimEnd: 0.4 };
+    const project = createProject('p', [createTrack('T1', [clip as never])]);
+    const plan = resolveRenderPlan(project);
+
+    const sched = plan.tracks[0]!.clips[0]!;
+    expect(sched.offset).toBeCloseTo(0);
+    expect(sched.duration).toBeCloseTo(0.6);
+  });
+
+  it('window crop + trimStart combined: offset accumulates both', () => {
+    // 1s buffer, 0.2s head trimmed → visible window is [0.2, 1.0) of the buffer.
+    // Clip starts at t=0 on the timeline. Export window starts at t=0.1 (inside the visible part).
+    // into = 0.1s elapsed in the visible window → buffer offset = trimStart(0.2) + into(0.1) = 0.3.
+    const clip = { ...createClip(oneSec(), 'a', 0), trimStart: 0.2 };
+    const project = createProject('p', [createTrack('T1', [clip as never])]);
+    const plan = resolveRenderPlan(project, { start: 0.1, end: 0.8 });
+
+    const sched = plan.tracks[0]!.clips[0]!;
+    expect(sched.when).toBeCloseTo(0); // clip already playing at window start
+    expect(sched.offset).toBeCloseTo(0.3); // trimStart(0.2) + elapsed(0.1)
+    expect(sched.duration).toBeCloseTo(0.7); // visible end is t=0.8 on timeline (1.0 - 0.2 trimEnd=0)
+  });
+
+  it('trimmed clip whose visible portion ends before the window is dropped', () => {
+    // 1s buffer at t=0, 0.6s tail trimmed → visible only covers [0, 0.4) on the timeline.
+    // Export window starts at t=0.5 — fully after the visible portion ends.
+    const clipped = { ...createClip(oneSec(), 'a', 0), trimEnd: 0.6 };
+    const normal = createClip(oneSec(), 'b', 1); // inside the window for reference
+    const project = createProject('p', [createTrack('T1', [clipped as never, normal])]);
+    const plan = resolveRenderPlan(project, { start: 0.5, end: 2 });
+
+    expect(plan.tracks[0]!.clips).toHaveLength(1);
+    expect(plan.tracks[0]!.clips[0]!.when).toBeCloseTo(0.5); // the normal clip, not the trimmed one
   });
 });
 
