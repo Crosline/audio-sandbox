@@ -159,7 +159,7 @@
     const over = trackAtY(e.clientY);
     if (over === 'new') {
       const fresh = studio.addTrack();
-      studio.moveClipToTrack(drag.fromTrackId, drag.clipId, fresh.id, targetStart);
+      studio.moveClipToTrack(drag.fromTrackId, drag.clipId, fresh.id, targetStart, { createdTrackId: fresh.id });
     } else if (over && over !== drag.fromTrackId) {
       studio.moveClipToTrack(drag.fromTrackId, drag.clipId, over, targetStart);
     } else {

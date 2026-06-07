@@ -72,6 +72,8 @@ interface MoveAcrossEdit {
   fromTrackId: string;
   fromStart: number;
   toTrackId: string;
+  /** Set when a new track was created for this move. Undo also removes that track. */
+  createdTrackId?: string;
 }
 type Edit = BufferEdit | AddClipEdit | RemoveTrackEdit | MoveAcrossEdit;
 
@@ -385,10 +387,16 @@ export class Studio {
    * If `toTrackId === fromTrackId`, delegates to the in-track {@link moveClip}. Undoable as a
    * single `move-across` edit committed on drop (not coalesced).
    */
-  moveClipToTrack(fromTrackId: string, clipId: string, toTrackId: string, desiredStart: number): void {
+  moveClipToTrack(
+    fromTrackId: string,
+    clipId: string,
+    toTrackId: string,
+    desiredStart: number,
+    opts?: { createdTrackId?: string },
+  ): void {
     if (toTrackId === fromTrackId) {
       this.moveClip(fromTrackId, clipId, desiredStart);
-      this.endClipMove();
+      this.endClipMove(); // already clears #movingClipId
       return;
     }
     const from = this.#findClip(fromTrackId, clipId);
@@ -403,9 +411,10 @@ export class Studio {
     this.#insertClip(toTrackId, { ...moved, start });
     this.#history.push(
       'Move clip to track',
-      { kind: 'move-across', clipId, fromTrackId, fromStart, toTrackId },
+      { kind: 'move-across', clipId, fromTrackId, fromStart, toTrackId, createdTrackId: opts?.createdTrackId },
       0,
     );
+    this.#movingClipId = null;
     this.lastTrackId = toTrackId;
     this.selectClip(toTrackId, clipId);
     this.#refreshHistoryFlags();
@@ -626,6 +635,9 @@ export class Studio {
       case 'move-across': {
         const moved = this.#removeClipFrom(edit.toTrackId, edit.clipId);
         if (moved) this.#insertClip(edit.fromTrackId, { ...moved, start: edit.fromStart });
+        if (edit.createdTrackId) {
+          this.removeTrack(edit.createdTrackId, { record: false });
+        }
         break;
       }
     }
@@ -651,6 +663,16 @@ export class Studio {
         this.removeTrack(edit.track.id, { record: false });
         break;
       case 'move-across': {
+        if (edit.createdTrackId) {
+          // Redo must recreate the track if it was created by the drop.
+          // Only insert if not already present (idempotent guard).
+          if (!this.project.tracks.find((t) => t.id === edit.createdTrackId)) {
+            this.#insertTrackAt(
+              { id: edit.createdTrackId, name: 'Track', clips: [], gain: 1, pan: 0, muted: false, soloed: false },
+              this.project.tracks.length,
+            );
+          }
+        }
         const moved = this.#removeClipFrom(edit.fromTrackId, edit.clipId);
         if (moved) {
           const dest = this.project.tracks.find((t) => t.id === edit.toTrackId);
