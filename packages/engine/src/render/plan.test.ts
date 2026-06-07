@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createClip, createProject, createTrack } from '../model/project.js';
 import { makeMono } from '../test-helpers.js';
 import { resolveRenderPlan } from './plan.js';
+import type { Track } from '../model/types.js';
 
 /** A 1-second mono buffer (8000 frames @ 8000 Hz) of constant value. */
 function oneSec(value = 1): AudioBuffer {
@@ -53,5 +54,86 @@ describe('resolveRenderPlan — window + scheduling', () => {
     expect(plan.lengthSamples).toBe(0);
     expect(plan.tracks).toHaveLength(1);
     expect(plan.tracks[0]!.clips).toHaveLength(0);
+  });
+});
+
+/** A track with one full-window 1s clip and explicit mixer state. */
+function trackWith(
+  name: string,
+  state: Partial<Pick<Track, 'gain' | 'muted' | 'soloed'>> = {},
+): Track {
+  const t = createTrack(name, [createClip(oneSec(), name, 0)]);
+  return { ...t, ...state };
+}
+
+/** Find a track's plan entry by name (tracks keep model order). */
+function gainOf(plan: ReturnType<typeof resolveRenderPlan>, index: number): number | undefined {
+  return plan.tracks[index]?.gain;
+}
+
+describe('resolveRenderPlan — mixer resolution', () => {
+  it('uses each track gain by default', () => {
+    const project = createProject('p', [trackWith('A', { gain: 0.5 }), trackWith('B', { gain: 0.8 })]);
+    const plan = resolveRenderPlan(project);
+    expect(plan.tracks).toHaveLength(2);
+    expect(gainOf(plan, 0)).toBe(0.5);
+    expect(gainOf(plan, 1)).toBe(0.8);
+  });
+
+  it('excludes muted tracks', () => {
+    const project = createProject('p', [trackWith('A', { muted: true }), trackWith('B')]);
+    const plan = resolveRenderPlan(project);
+    expect(plan.tracks).toHaveLength(1);
+    expect(plan.tracks[0]!.trackId).toBe(project.tracks[1]!.id);
+  });
+
+  it('includes muted tracks when includeMuted is set', () => {
+    const project = createProject('p', [trackWith('A', { muted: true, gain: 0.3 })]);
+    const plan = resolveRenderPlan(project, { includeMuted: true });
+    expect(plan.tracks).toHaveLength(1);
+    expect(gainOf(plan, 0)).toBe(0.3);
+  });
+
+  it('renders only soloed tracks when any track is soloed', () => {
+    const project = createProject('p', [trackWith('A', { soloed: true }), trackWith('B')]);
+    const plan = resolveRenderPlan(project);
+    expect(plan.tracks).toHaveLength(1);
+    expect(plan.tracks[0]!.trackId).toBe(project.tracks[0]!.id);
+  });
+
+  it('forces unity gain on included tracks when unityGain is set', () => {
+    const project = createProject('p', [trackWith('A', { gain: 0.2 }), trackWith('B', { gain: 0.9 })]);
+    const plan = resolveRenderPlan(project, { unityGain: true });
+    expect(gainOf(plan, 0)).toBe(1);
+    expect(gainOf(plan, 1)).toBe(1);
+  });
+
+  it('applies per-track overrides last (gain wins over unityGain)', () => {
+    const project = createProject('p', [trackWith('A', { gain: 0.2 })]);
+    const overrides = new Map([[project.tracks[0]!.id, { gain: 0.42 }]]);
+    const plan = resolveRenderPlan(project, { unityGain: true, overrides });
+    expect(gainOf(plan, 0)).toBe(0.42);
+  });
+
+  it('an override can un-mute a track', () => {
+    const project = createProject('p', [trackWith('A', { muted: true, gain: 0.7 })]);
+    const overrides = new Map([[project.tracks[0]!.id, { muted: false }]]);
+    const plan = resolveRenderPlan(project, { overrides });
+    expect(plan.tracks).toHaveLength(1);
+    expect(gainOf(plan, 0)).toBe(0.7);
+  });
+
+  it('onlyTrackId renders a single track even past another track being soloed', () => {
+    const project = createProject('p', [trackWith('A', { soloed: true }), trackWith('B', { gain: 0.6 })]);
+    const planB = resolveRenderPlan(project, {}, project.tracks[1]!.id);
+    expect(planB.tracks).toHaveLength(1);
+    expect(planB.tracks[0]!.trackId).toBe(project.tracks[1]!.id);
+    expect(gainOf(planB, 0)).toBe(0.6);
+  });
+
+  it('onlyTrackId still excludes the track if it is muted', () => {
+    const project = createProject('p', [trackWith('A', { muted: true })]);
+    const plan = resolveRenderPlan(project, {}, project.tracks[0]!.id);
+    expect(plan.tracks).toHaveLength(0);
   });
 });
