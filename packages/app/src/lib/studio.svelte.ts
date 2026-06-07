@@ -8,6 +8,7 @@
  */
 import {
   clampClipStart,
+  clipDuration,
   copySeconds,
   createClip,
   createContextFactory,
@@ -20,6 +21,7 @@ import {
   History,
   insertBufferSeconds,
   projectDuration,
+  resizeClip,
   silenceRegionSeconds,
   Transport,
   trimSeconds,
@@ -46,6 +48,9 @@ interface ClipSnapshot {
   buffer: AudioBuffer;
   /** Clip start at snapshot time. Present for move edits; restored on undo/redo. */
   start?: number;
+  /** Trim at snapshot time. Present for resize edits; restored on undo/redo. */
+  trimStart?: number;
+  trimEnd?: number;
 }
 
 /** Rough byte size of an AudioBuffer (Float32 samples), for the history budget. */
@@ -96,6 +101,8 @@ export class Studio {
   #clipboard: AudioBuffer | null = null;
   /** The clip currently being drag-moved, so its moves coalesce into one history entry. */
   #movingClipId: string | null = null;
+  /** The clip currently being drag-resized, so its resizes coalesce into one history entry. */
+  #resizingClipId: string | null = null;
   /**
    * Absolute timeline second at which a selection-audition should stop, or null when
    * playing the whole project. Read by the RAF loop; set by {@link play}.
@@ -221,7 +228,7 @@ export class Studio {
     });
   }
 
-  /** Apply a restored snapshot: swap the buffer, and the start too if the snapshot carried one. */
+  /** Apply a restored snapshot: swap the buffer, and the start/trim too if the snapshot carried them. */
   #restoreSnapshot(s: ClipSnapshot): void {
     const track = this.project.tracks.find((t) => t.id === s.trackId);
     if (!track) return;
@@ -229,7 +236,13 @@ export class Studio {
       ...track,
       clips: track.clips.map((c) =>
         c.id === s.clipId
-          ? { ...c, buffer: s.buffer, ...(s.start !== undefined ? { start: s.start } : {}) }
+          ? {
+              ...c,
+              buffer: s.buffer,
+              ...(s.start !== undefined ? { start: s.start } : {}),
+              ...(s.trimStart !== undefined ? { trimStart: s.trimStart } : {}),
+              ...(s.trimEnd !== undefined ? { trimEnd: s.trimEnd } : {}),
+            }
           : c,
       ),
     });
@@ -305,6 +318,62 @@ export class Studio {
   /** End a drag-move gesture so the next {@link moveClip} opens a fresh, separately-undoable entry. */
   endClipMove(): void {
     this.#movingClipId = null;
+  }
+
+  /**
+   * Resize one edge of a clip non-destructively (sets trim; left edge also shifts start).
+   * Undoable, coalesced into ONE history entry per drag gesture (like {@link moveClip}).
+   * `desiredTrim` is the target trim amount (seconds) from that edge of the buffer.
+   */
+  resizeClip(
+    trackId: string,
+    clipId: string,
+    edge: 'left' | 'right',
+    desiredTrim: number,
+  ): void {
+    const found = this.#findClip(trackId, clipId);
+    if (!found) return;
+    const { track, clip } = found;
+    const geom = resizeClip(clip, edge, desiredTrim);
+    // No-overlap clamp: growing the LEFT edge can't run into the left neighbor. Re-clamp the
+    // resulting start against the track (the moving clip's new visible duration is implied by
+    // the trim we're about to apply, so clamp a hypothetical clip with the new trim).
+    const probe = { ...track, clips: track.clips.map((c) => (c.id === clipId ? { ...c, ...geom } : c)) };
+    const clampedStart = clampClipStart(probe, clipId, geom.start);
+    const next = { ...geom, start: clampedStart };
+    if (
+      next.start === clip.start &&
+      next.trimStart === (clip.trimStart ?? 0) &&
+      next.trimEnd === (clip.trimEnd ?? 0)
+    ) {
+      return; // no change — don't pollute history
+    }
+    const continuing = this.#resizingClipId === clipId;
+    if (!continuing) {
+      this.#history.push(
+        'Resize clip',
+        {
+          trackId,
+          clipId,
+          buffer: clip.buffer,
+          start: clip.start,
+          trimStart: clip.trimStart ?? 0,
+          trimEnd: clip.trimEnd ?? 0,
+        },
+        bufferBytes(clip.buffer),
+      );
+      this.#resizingClipId = clipId;
+    }
+    this.updateTrack({
+      ...track,
+      clips: track.clips.map((c) => (c.id === clipId ? { ...c, ...next } : c)),
+    });
+    this.#refreshHistoryFlags();
+  }
+
+  /** End a drag-resize gesture so the next {@link resizeClip} opens a fresh undo entry. */
+  endClipResize(): void {
+    this.#resizingClipId = null;
   }
 
   /**

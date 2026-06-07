@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Track } from '@audiosandbox/engine';
+  import { clipDuration, type Track } from '@audiosandbox/engine';
   import type { Studio } from '../lib/studio.svelte.js';
   import Waveform from './Waveform.svelte';
 
@@ -12,12 +12,9 @@
 
   let { studio, track, color }: Props = $props();
 
-  // The track's full extent: the right edge of its furthest clip. 0 when empty.
+  // The track's full extent: the right edge of its furthest clip (trim-aware). 0 when empty.
   let laneWidth = $derived(
-    track.clips.reduce(
-      (w, c) => Math.max(w, studio.timeToPx(c.start + c.buffer.duration)),
-      0,
-    ),
+    track.clips.reduce((w, c) => Math.max(w, studio.timeToPx(c.start + clipDuration(c))), 0),
   );
 
   // The time-range highlight, only when the current selection belongs to a clip on this track.
@@ -40,6 +37,12 @@
   let dragging = false;
   let pointerDown = false;
 
+  // Resize gesture state.
+  let resizing: 'left' | 'right' | null = null;
+  let resizeClipId: string | null = null;
+  let resizePressX = 0;
+  let resizeOrigTrim = 0; // the edge's trim at press time
+
   function laneX(e: PointerEvent): number {
     return e.clientX - lane.getBoundingClientRect().left;
   }
@@ -61,6 +64,7 @@
   }
 
   function onPointerMove(e: PointerEvent): void {
+    if (resizing) { onResizeMove(e); return; }
     if (!pointerDown || !pressClipId) return;
     const x = laneX(e);
     if (!dragging && Math.abs(x - pressX) < DRAG_THRESHOLD) return;
@@ -84,6 +88,7 @@
   }
 
   function onPointerUp(e: PointerEvent): void {
+    if (resizing) { onResizeUp(e); return; }
     if (!pointerDown) return;
     pointerDown = false;
     try {
@@ -100,6 +105,45 @@
     studio.endClipMove(); // close any drag-move gesture so its undo is one step
     dragging = false;
     pressClipId = null;
+  }
+
+  function onResizeDown(
+    e: PointerEvent,
+    clip: { id: string; start: number; buffer: AudioBuffer; trimStart?: number; trimEnd?: number },
+    edge: 'left' | 'right',
+  ): void {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    resizing = edge;
+    resizeClipId = clip.id;
+    resizePressX = laneX(e);
+    resizeOrigTrim = (edge === 'left' ? clip.trimStart : clip.trimEnd) ?? 0;
+    try {
+      lane.setPointerCapture(e.pointerId);
+    } catch {
+      /* nicety */
+    }
+  }
+
+  function onResizeMove(e: PointerEvent): void {
+    if (!resizing || !resizeClipId) return;
+    const dxSec = studio.pxToTime(laneX(e) - resizePressX);
+    // Dragging the LEFT edge right (positive dx) ADDS head trim; the RIGHT edge left
+    // (negative dx) ADDS tail trim. So left uses +dx, right uses -dx.
+    const desiredTrim = resizeOrigTrim + (resizing === 'left' ? dxSec : -dxSec);
+    studio.resizeClip(track.id, resizeClipId, resizing, desiredTrim);
+  }
+
+  function onResizeUp(e: PointerEvent): void {
+    if (!resizing) return;
+    resizing = null;
+    resizeClipId = null;
+    studio.endClipResize();
+    try {
+      lane.releasePointerCapture(e.pointerId);
+    } catch {
+      /* never captured */
+    }
   }
 
   // Click on the lane *background* (not on a clip box) → clear object-selection and seek.
@@ -174,15 +218,15 @@
         class="absolute inset-y-0 overflow-hidden rounded-sm {isObjectSelected(clip.id)
           ? 'border-2 border-[var(--color-accent)] cursor-grab'
           : 'border border-[var(--color-border)]'}"
-        style="left: {studio.timeToPx(clip.start)}px; width: {studio.timeToPx(
-          clip.buffer.duration,
-        )}px"
+        style="left: {studio.timeToPx(clip.start)}px; width: {studio.timeToPx(clipDuration(clip))}px"
         data-testid="clip"
         data-clip-id={clip.id}
         role="presentation"
         onpointerdown={(e) => onClipPointerDown(e, clip)}
       >
-        <Waveform buffer={clip.buffer} width={studio.timeToPx(clip.buffer.duration)} {color} height={96} />
+        <div class="absolute inset-y-0" style="left: {-studio.timeToPx(clip.trimStart ?? 0)}px">
+          <Waveform buffer={clip.buffer} width={studio.timeToPx(clip.buffer.duration)} {color} height={96} />
+        </div>
         {#if selFor(clip.id)}
           {@const sel = selFor(clip.id)!}
           <div
@@ -194,6 +238,19 @@
             )}px"
           ></div>
         {/if}
+        <!-- edge resize handles -->
+        <div
+          class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize"
+          data-testid="resize-left"
+          role="presentation"
+          onpointerdown={(e) => onResizeDown(e, clip, 'left')}
+        ></div>
+        <div
+          class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize"
+          data-testid="resize-right"
+          role="presentation"
+          onpointerdown={(e) => onResizeDown(e, clip, 'right')}
+        ></div>
       </div>
     {/each}
   </div>
