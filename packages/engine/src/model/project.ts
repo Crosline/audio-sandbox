@@ -29,6 +29,41 @@ export function clipEnd(clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'tri
   return clip.start + clipDuration(clip);
 }
 
+/**
+ * Geometry for a non-destructive edge resize. `desiredTrim` is the target trim amount
+ * (seconds) measured from the named edge of the buffer; negative means grow the clip back
+ * out toward the buffer's natural edge. Returns the clip's new `start`/`trimStart`/`trimEnd`.
+ *
+ * - Right edge: only `trimEnd` changes; `start` and `trimStart` are untouched.
+ * - Left edge: `trimStart` changes AND `start` moves by the same delta, so the audio under
+ *   the kept region stays fixed on the timeline (the clip's left face slides, the audio does
+ *   not).
+ *
+ * Trims are clamped to `[0, buffer.duration - opposite - MIN_CLIP_DURATION]` so the clip
+ * never inverts and visible duration stays >= MIN_CLIP_DURATION. Overlap with neighbors is
+ * NOT considered here — the caller applies that separately.
+ */
+export function resizeClip(
+  clip: Pick<Clip, 'buffer' | 'start' | 'trimStart' | 'trimEnd'>,
+  edge: 'left' | 'right',
+  desiredTrim: number,
+): { start: number; trimStart: number; trimEnd: number } {
+  const total = clip.buffer.duration;
+  const curStart = clip.trimStart ?? 0;
+  const curEnd = clip.trimEnd ?? 0;
+
+  if (edge === 'right') {
+    const maxEnd = Math.max(0, total - curStart - MIN_CLIP_DURATION);
+    const trimEnd = Math.min(Math.max(0, desiredTrim), maxEnd);
+    return { start: clip.start, trimStart: curStart, trimEnd };
+  }
+  // left edge
+  const maxStart = Math.max(0, total - curEnd - MIN_CLIP_DURATION);
+  const trimStart = Math.min(Math.max(0, desiredTrim), maxStart);
+  const delta = trimStart - curStart; // how much the left face moved
+  return { start: clip.start + delta, trimStart, trimEnd: curEnd };
+}
+
 export function createTrack(name: string, clips: Clip[] = []): Track {
   return {
     id: createId(),

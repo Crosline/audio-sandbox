@@ -10,7 +10,9 @@ import {
   createTrack,
   DEFAULT_GAIN,
   isTrackAudible,
+  MIN_CLIP_DURATION,
   projectDuration,
+  resizeClip,
   trackTargetGain,
 } from './project.js';
 
@@ -180,5 +182,45 @@ describe('clampClipStart respects trim (visible duration)', () => {
     const track = createTrack('t', [left, moving, right]);
     // The [1.0,1.5) gap is exactly 0.5s — the trimmed clip fits flush at 1.0.
     expect(clampClipStart(track, moving.id, 1.0)).toBeCloseTo(1.0);
+  });
+});
+
+describe('resizeClip', () => {
+  const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s
+
+  it('right edge: sets trimEnd, leaves start and trimStart', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'right', 0.3); // hide 0.3s of the tail
+    expect(r.start).toBeCloseTo(2);
+    expect(r.trimStart).toBeCloseTo(0);
+    expect(r.trimEnd).toBeCloseTo(0.3);
+  });
+
+  it('left edge: trimStart and start move together by the same delta', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'left', 0.4); // hide 0.4s of the head
+    expect(r.trimStart).toBeCloseTo(0.4);
+    expect(r.start).toBeCloseTo(2.4); // left face moves right; audio under kept region stays put
+    expect(r.trimEnd).toBeCloseTo(0);
+  });
+
+  it('clamps so visible duration never drops below MIN_CLIP_DURATION', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'right', 5); // absurd over-trim on a 1s clip
+    expect(clipDuration({ ...clip, ...r })).toBeCloseTo(MIN_CLIP_DURATION);
+  });
+
+  it('clamps negative trim (growing past the buffer edge) to 0', () => {
+    const clip = { ...createClip(buf(), 'a', 2), trimEnd: 0.3 };
+    const r = resizeClip(clip, 'right', -1); // pull the right edge back out fully
+    expect(r.trimEnd).toBeCloseTo(0);
+  });
+
+  it('left edge clamp also keeps start consistent', () => {
+    const clip = createClip(buf(), 'a', 2);
+    const r = resizeClip(clip, 'left', 5); // over-trim from the left
+    expect(clipDuration({ ...clip, ...r })).toBeCloseTo(MIN_CLIP_DURATION);
+    // start moved right by exactly the applied trimStart
+    expect(r.start - 2).toBeCloseTo(r.trimStart);
   });
 });

@@ -37,6 +37,7 @@ export {
   isTrackAudible,
   MIN_CLIP_DURATION,
   projectDuration,
+  resizeClip,
   trackTargetGain,
 } from './model/project.js';
 
