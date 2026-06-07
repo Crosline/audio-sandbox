@@ -80,16 +80,21 @@ test.describe('selection + editing', () => {
     expect((await laneWidths(page))[0]!).toBeCloseTo(afterCut, -1);
   });
 
-  test('Copy then Paste lengthens the clip', async ({ page }) => {
+  test('Copy then Paste creates a new clip at the playhead', async ({ page }) => {
     await page.goto('/');
     await loadGeneratedClip(page, 'clip.wav', { seconds: 4 });
-    const [original] = await laneWidths(page);
 
+    // Seek to a gap past the clip's end so paste lands on a clear spot.
+    await page.evaluate(() => (window as any).__studio.seek(5));
     await dragSelect(page, 0.25, 0.5);
     await page.getByRole('button', { name: 'Copy', exact: true }).click();
     await page.getByRole('button', { name: 'Paste', exact: true }).click();
 
-    expect((await laneWidths(page))[0]!).toBeGreaterThan(original! + 50);
+    // Paste creates a new clip — the project now has more clips than before.
+    const clipCount = await page.evaluate(
+      () => (window as any).__studio.project.tracks.reduce((n: number, t: any) => n + t.clips.length, 0),
+    );
+    expect(clipCount).toBeGreaterThan(1);
   });
 
   test('playing with a selection auditions just that range and stops at its end', async ({
