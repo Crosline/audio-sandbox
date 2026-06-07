@@ -8,6 +8,7 @@
  */
 import {
   clampClipStart,
+  clipDuration,
   copySeconds,
   createClip,
   createContextFactory,
@@ -20,6 +21,7 @@ import {
   History,
   insertBufferSeconds,
   projectDuration,
+  resizeClip,
   silenceRegionSeconds,
   Transport,
   trimSeconds,
@@ -39,14 +41,41 @@ export interface Selection {
   end: number;
 }
 
-/** An undo snapshot: a clip's prior buffer and (for moves) prior start, so undo can restore it. */
-interface ClipSnapshot {
+/** A buffer/move/resize edit: restore a clip's buffer (+ start/trim) on undo. */
+interface BufferEdit {
+  kind: 'buffer';
   trackId: string;
   clipId: string;
   buffer: AudioBuffer;
-  /** Clip start at snapshot time. Present for move edits; restored on undo/redo. */
   start?: number;
+  trimStart?: number;
+  trimEnd?: number;
 }
+/** A clip was added (e.g. paste): undo removes it, redo re-adds it. */
+interface AddClipEdit {
+  kind: 'add-clip';
+  trackId: string;
+  clip: Clip;
+  /** Set when paste() created a new track for this clip. Undo also removes that track. */
+  createdTrackId?: string;
+}
+/** A track was removed: undo re-inserts it at `index`, redo removes it again. */
+interface RemoveTrackEdit {
+  kind: 'remove-track';
+  track: Track;
+  index: number;
+}
+/** A clip moved across tracks: undo returns it to `fromTrackId`@`fromStart`. */
+interface MoveAcrossEdit {
+  kind: 'move-across';
+  clipId: string;
+  fromTrackId: string;
+  fromStart: number;
+  toTrackId: string;
+  /** Set when a new track was created for this move. Undo also removes that track. */
+  createdTrackId?: string;
+}
+type Edit = BufferEdit | AddClipEdit | RemoveTrackEdit | MoveAcrossEdit;
 
 /** Rough byte size of an AudioBuffer (Float32 samples), for the history budget. */
 function bufferBytes(buffer: AudioBuffer): number {
@@ -82,18 +111,25 @@ export class Studio {
   selection = $state<Selection | null>(null);
   /** A clip selected *as an object* (for move), distinct from the time-range `selection`. */
   selectedClip = $state<{ trackId: string; clipId: string } | null>(null);
+  /** The most recently interacted track (clicked clip, seeked lane, dropped file). */
+  lastTrackId = $state<string | null>(null);
   /** Mirrors of the history flags so buttons react. Refreshed after every edit/undo/redo. */
   canUndo = $state(false);
   canRedo = $state(false);
   /** Reactive mirror of "is there something to paste?" (the clipboard itself isn't reactive). */
   canPaste = $state(false);
 
+  /** Active clip drag (set by the lane on drag-move start; consumed by the timeline surface). */
+  clipDrag = $state<{ fromTrackId: string; clipId: string; grabInClipPx: number } | null>(null);
+
   /** Bounded undo/redo of clip-buffer edits (see {@link HISTORY_LIMITS}). */
-  readonly #history = new History<ClipSnapshot>(HISTORY_LIMITS);
+  readonly #history = new History<Edit>(HISTORY_LIMITS);
   /** Cut/copy place the selected slice here; paste reads it. Not reactive. */
   #clipboard: AudioBuffer | null = null;
   /** The clip currently being drag-moved, so its moves coalesce into one history entry. */
   #movingClipId: string | null = null;
+  /** The clip currently being drag-resized, so its resizes coalesce into one history entry. */
+  #resizingClipId: string | null = null;
   /**
    * Absolute timeline second at which a selection-audition should stop, or null when
    * playing the whole project. Read by the RAF loop; set by {@link play}.
@@ -152,12 +188,24 @@ export class Studio {
     return track;
   }
 
-  removeTrack(trackId: string): void {
+  removeTrack(trackId: string, opts?: { record?: boolean }): void {
+    const index = this.project.tracks.findIndex((t) => t.id === trackId);
+    if (index < 0) return;
+    const track = this.project.tracks[index]!;
+    if (opts?.record !== false) {
+      this.#history.push(
+        'Delete track',
+        { kind: 'remove-track', track, index },
+        this.#editBytes({ kind: 'remove-track', track, index }),
+      );
+    }
     this.project = {
       ...this.project,
       tracks: this.project.tracks.filter((t) => t.id !== trackId),
     };
     this.#transport.releaseTrack(trackId);
+    if (this.lastTrackId === trackId) this.lastTrackId = null;
+    this.#refreshHistoryFlags();
   }
 
   /** Replace a track (e.g. after mute/solo/volume change or editing a clip). */
@@ -219,18 +267,47 @@ export class Studio {
     });
   }
 
-  /** Apply a restored snapshot: swap the buffer, and the start too if the snapshot carried one. */
-  #restoreSnapshot(s: ClipSnapshot): void {
+  /** Apply a restored BufferEdit: swap the buffer, and the start/trim too if the edit carried them. */
+  #applyBufferEdit(s: BufferEdit): void {
     const track = this.project.tracks.find((t) => t.id === s.trackId);
     if (!track) return;
     this.updateTrack({
       ...track,
       clips: track.clips.map((c) =>
         c.id === s.clipId
-          ? { ...c, buffer: s.buffer, ...(s.start !== undefined ? { start: s.start } : {}) }
+          ? {
+              ...c,
+              buffer: s.buffer,
+              ...(s.start !== undefined ? { start: s.start } : {}),
+              ...(s.trimStart !== undefined ? { trimStart: s.trimStart } : {}),
+              ...(s.trimEnd !== undefined ? { trimEnd: s.trimEnd } : {}),
+            }
           : c,
       ),
     });
+  }
+
+  /** Insert a clip onto a track (used by add-clip redo / move-across redo). */
+  #insertClip(trackId: string, clip: Clip): void {
+    const track = this.project.tracks.find((t) => t.id === trackId);
+    if (!track) return;
+    this.updateTrack({ ...track, clips: [...track.clips, clip] });
+  }
+
+  /** Remove a clip by id from a track (used by add-clip undo / move-across). */
+  #removeClipFrom(trackId: string, clipId: string): Clip | undefined {
+    const track = this.project.tracks.find((t) => t.id === trackId);
+    const clip = track?.clips.find((c) => c.id === clipId);
+    if (!track || !clip) return undefined;
+    this.updateTrack({ ...track, clips: track.clips.filter((c) => c.id !== clipId) });
+    return clip;
+  }
+
+  /** Re-insert a whole track at a specific index (remove-track undo). */
+  #insertTrackAt(track: Track, index: number): void {
+    const tracks = [...this.project.tracks];
+    tracks.splice(Math.min(index, tracks.length), 0, track);
+    this.project = { ...this.project, tracks };
   }
 
   /** Set (or clear) the selection, clamping its range to the target clip's duration. */
@@ -253,10 +330,16 @@ export class Studio {
     this.#playRangeEnd = null;
   }
 
-  /** Select a clip as an object (for moving). Mutually exclusive with the time-range selection. */
-  selectClip(trackId: string, clipId: string): void {
+  /**
+   * Select a clip as an object (for moving). Optionally seek the playhead to `atSeconds`
+   * (the clicked point) while KEEPING the clip selected. Mutually exclusive with the
+   * time-range selection.
+   */
+  selectClip(trackId: string, clipId: string, atSeconds?: number): void {
     this.clearSelection();
     this.selectedClip = { trackId, clipId };
+    this.lastTrackId = trackId;
+    if (atSeconds !== undefined) this.#seekTransport(atSeconds);
   }
 
   /** Clear the object-selection (e.g. when a range-select or seek takes over). */
@@ -282,7 +365,7 @@ export class Studio {
     if (!continuingDrag) {
       this.#history.push(
         'Move clip',
-        { trackId, clipId, buffer: clip.buffer, start: clip.start },
+        { kind: 'buffer', trackId, clipId, buffer: clip.buffer, start: clip.start },
         bufferBytes(clip.buffer),
       );
       this.#movingClipId = clipId;
@@ -297,6 +380,101 @@ export class Studio {
   /** End a drag-move gesture so the next {@link moveClip} opens a fresh, separately-undoable entry. */
   endClipMove(): void {
     this.#movingClipId = null;
+  }
+
+  /**
+   * Move a clip to another track at `desiredStart` (clamped no-overlap on the destination).
+   * If `toTrackId === fromTrackId`, delegates to the in-track {@link moveClip}. Undoable as a
+   * single `move-across` edit committed on drop (not coalesced).
+   */
+  moveClipToTrack(
+    fromTrackId: string,
+    clipId: string,
+    toTrackId: string,
+    desiredStart: number,
+    opts?: { createdTrackId?: string },
+  ): void {
+    if (toTrackId === fromTrackId) {
+      this.moveClip(fromTrackId, clipId, desiredStart);
+      this.endClipMove(); // already clears #movingClipId
+      return;
+    }
+    const from = this.#findClip(fromTrackId, clipId);
+    if (!from) return;
+    const fromStart = from.clip.start;
+    const moved = this.#removeClipFrom(fromTrackId, clipId);
+    if (!moved) return;
+    const dest = this.project.tracks.find((t) => t.id === toTrackId);
+    const start = dest
+      ? clampClipStart({ ...dest, clips: [...dest.clips, moved] }, moved.id, desiredStart)
+      : desiredStart;
+    this.#insertClip(toTrackId, { ...moved, start });
+    this.#history.push(
+      'Move clip to track',
+      { kind: 'move-across', clipId, fromTrackId, fromStart, toTrackId, createdTrackId: opts?.createdTrackId },
+      0,
+    );
+    this.#movingClipId = null;
+    this.lastTrackId = toTrackId;
+    this.selectClip(toTrackId, clipId);
+    this.#refreshHistoryFlags();
+  }
+
+  /**
+   * Resize one edge of a clip non-destructively (sets trim; left edge also shifts start).
+   * Undoable, coalesced into ONE history entry per drag gesture (like {@link moveClip}).
+   * `desiredTrim` is the target trim amount (seconds) from that edge of the buffer.
+   */
+  resizeClip(
+    trackId: string,
+    clipId: string,
+    edge: 'left' | 'right',
+    desiredTrim: number,
+  ): void {
+    const found = this.#findClip(trackId, clipId);
+    if (!found) return;
+    const { track, clip } = found;
+    const geom = resizeClip(clip, edge, desiredTrim);
+    // No-overlap clamp: growing the LEFT edge can't run into the left neighbor. Re-clamp the
+    // resulting start against the track (the moving clip's new visible duration is implied by
+    // the trim we're about to apply, so clamp a hypothetical clip with the new trim).
+    const probe = { ...track, clips: track.clips.map((c) => (c.id === clipId ? { ...c, ...geom } : c)) };
+    const clampedStart = clampClipStart(probe, clipId, geom.start);
+    const next = { ...geom, start: clampedStart };
+    if (
+      next.start === clip.start &&
+      next.trimStart === (clip.trimStart ?? 0) &&
+      next.trimEnd === (clip.trimEnd ?? 0)
+    ) {
+      return; // no change — don't pollute history
+    }
+    const continuing = this.#resizingClipId === clipId;
+    if (!continuing) {
+      this.#history.push(
+        'Resize clip',
+        {
+          kind: 'buffer',
+          trackId,
+          clipId,
+          buffer: clip.buffer,
+          start: clip.start,
+          trimStart: clip.trimStart ?? 0,
+          trimEnd: clip.trimEnd ?? 0,
+        },
+        bufferBytes(clip.buffer),
+      );
+      this.#resizingClipId = clipId;
+    }
+    this.updateTrack({
+      ...track,
+      clips: track.clips.map((c) => (c.id === clipId ? { ...c, ...next } : c)),
+    });
+    this.#refreshHistoryFlags();
+  }
+
+  /** End a drag-resize gesture so the next {@link resizeClip} opens a fresh undo entry. */
+  endClipResize(): void {
+    this.#resizingClipId = null;
   }
 
   /**
@@ -317,7 +495,7 @@ export class Studio {
     const after = transform(before, sel, this.bufferFactory);
     this.#history.push(
       label,
-      { trackId: sel.trackId, clipId: sel.clipId, buffer: before },
+      { kind: 'buffer', trackId: sel.trackId, clipId: sel.clipId, buffer: before },
       bufferBytes(before),
     );
     this.#replaceClipBuffer(sel.trackId, sel.clipId, after);
@@ -364,54 +542,204 @@ export class Studio {
     this.#editSelectedClip('Fade out', (buf, s, f) => fadeOutSeconds(buf, s.start, s.end, f), false);
   }
 
-  /** Paste the clipboard into the selected clip at the selection start. */
+  /**
+   * Paste the clipboard as a NEW clip at the playhead. Target track = the object-selected
+   * clip's track, else the last-interacted track, else a new track. If the playhead slot on
+   * the chosen track is occupied (clamping would shove the clip), create a new track instead.
+   */
   paste(): void {
     if (!this.#clipboard) return;
-    const clipboard = this.#clipboard;
-    this.#editSelectedClip('Paste', (buf, s, f) => insertBufferSeconds(buf, clipboard, s.start, f));
+    const at = this.playhead;
+    const newClip = createClip(this.#clipboard, 'Pasted', at);
+
+    // Choose the target track.
+    let target: Track | undefined =
+      (this.selectedClip && this.project.tracks.find((t) => t.id === this.selectedClip!.trackId)) ||
+      (this.lastTrackId ? this.project.tracks.find((t) => t.id === this.lastTrackId) : undefined) ||
+      undefined;
+
+    let placed: { trackId: string; clip: Clip; createdTrackId?: string };
+    if (target) {
+      const probe = { ...target, clips: [...target.clips, newClip] };
+      const start = clampClipStart(probe, newClip.id, at);
+      if (Math.abs(start - at) < 1e-6) {
+        placed = { trackId: target.id, clip: { ...newClip, start } };
+      } else {
+        // Slot occupied → new track instead.
+        const fresh = this.addTrack();
+        placed = { trackId: fresh.id, clip: { ...newClip, start: at }, createdTrackId: fresh.id };
+      }
+    } else {
+      const fresh = this.addTrack();
+      placed = { trackId: fresh.id, clip: { ...newClip, start: at }, createdTrackId: fresh.id };
+    }
+
+    // Record BEFORE mutating (consistent with moveClip, resizeClip, #editSelectedClip)
+    this.#history.push(
+      'Paste clip',
+      { kind: 'add-clip', trackId: placed.trackId, clip: placed.clip, createdTrackId: placed.createdTrackId },
+      bufferBytes(placed.clip.buffer),
+    );
+    this.#insertClip(placed.trackId, placed.clip);
+    this.lastTrackId = placed.trackId;
+    this.selectClip(placed.trackId, placed.clip.id);
+    this.#refreshHistoryFlags();
   }
 
   undo(): void {
-    const target = this.#historyTargetClip();
-    if (!target) return;
-    const restored = this.#history.undo(target, bufferBytes(target.buffer));
-    if (!restored) return;
-    this.#restoreSnapshot(restored.state);
+    const top = this.#history.peek();
+    if (!top) return;
+    const edit = top.state;
+    if (edit.kind === 'buffer') {
+      const target = this.#bufferTarget(edit);
+      const restored = this.#history.undo(target, bufferBytes(target.buffer));
+      if (restored) this.#applyBufferEdit(restored.state as BufferEdit);
+    } else {
+      // Structural: apply the inverse, then move the same entry to the redo stack.
+      this.#applyInverse(edit);
+      this.#history.undo(edit, this.#editBytes(edit));
+    }
     this.#refreshHistoryFlags();
   }
 
   redo(): void {
-    const target = this.#historyTargetClip();
-    if (!target) return;
-    const restored = this.#history.redo(target, bufferBytes(target.buffer));
-    if (!restored) return;
-    this.#restoreSnapshot(restored.state);
+    const top = this.#history.peekRedo();
+    if (!top) return;
+    const edit = top.state as Edit;
+    if (edit.kind === 'buffer') {
+      const probe = this.#liveBufferProbe();
+      if (!probe) return; // no clips to swap — shouldn't happen for buffer redo
+      const restored = this.#history.redo(probe, bufferBytes(probe.buffer));
+      if (restored) this.#applyBufferEdit(restored.state as BufferEdit);
+    } else {
+      // Structural: apply forward, then move the same entry to the undo stack.
+      this.#applyForward(edit);
+      this.#history.redo(edit, this.#editBytes(edit));
+    }
     this.#refreshHistoryFlags();
   }
 
-  /**
-   * The clip whose current buffer undo/redo should stash. The history entry carries its own
-   * target ids; here we just need *a* clip whose live buffer to push onto the opposite stack.
-   * Prefer the selected clip, else the first clip of the first track (single-clip-per-track
-   * in v1).
-   */
-  #historyTargetClip(): ClipSnapshot | undefined {
-    const sel = this.selection;
+  /** Apply the UNDO direction of a structural edit. */
+  #applyInverse(edit: Exclude<Edit, BufferEdit>): void {
+    switch (edit.kind) {
+      case 'add-clip':
+        this.#removeClipFrom(edit.trackId, edit.clip.id);
+        if (edit.createdTrackId) {
+          // The paste created this track; undo must also remove it.
+          this.removeTrack(edit.createdTrackId, { record: false });
+        }
+        break;
+      case 'remove-track':
+        this.#insertTrackAt(edit.track, edit.index);
+        break;
+      case 'move-across': {
+        const moved = this.#removeClipFrom(edit.toTrackId, edit.clipId);
+        if (moved) this.#insertClip(edit.fromTrackId, { ...moved, start: edit.fromStart });
+        if (edit.createdTrackId) {
+          this.removeTrack(edit.createdTrackId, { record: false });
+        }
+        break;
+      }
+    }
+  }
+
+  /** Apply the REDO direction of a structural edit. */
+  #applyForward(edit: Exclude<Edit, BufferEdit>): void {
+    switch (edit.kind) {
+      case 'add-clip':
+        if (edit.createdTrackId) {
+          // Redo must recreate the track if it was created by paste.
+          // Only insert if not already present (idempotent guard).
+          if (!this.project.tracks.find((t) => t.id === edit.createdTrackId)) {
+            this.#insertTrackAt(
+              { id: edit.createdTrackId, name: 'Track', clips: [], gain: 1, pan: 0, muted: false, soloed: false },
+              this.project.tracks.length,
+            );
+          }
+        }
+        this.#insertClip(edit.trackId, edit.clip);
+        break;
+      case 'remove-track':
+        this.removeTrack(edit.track.id, { record: false });
+        break;
+      case 'move-across': {
+        if (edit.createdTrackId) {
+          // Redo must recreate the track if it was created by the drop.
+          // Only insert if not already present (idempotent guard).
+          if (!this.project.tracks.find((t) => t.id === edit.createdTrackId)) {
+            this.#insertTrackAt(
+              { id: edit.createdTrackId, name: 'Track', clips: [], gain: 1, pan: 0, muted: false, soloed: false },
+              this.project.tracks.length,
+            );
+          }
+        }
+        const moved = this.#removeClipFrom(edit.fromTrackId, edit.clipId);
+        if (moved) {
+          const dest = this.project.tracks.find((t) => t.id === edit.toTrackId);
+          const start = dest
+            ? clampClipStart({ ...dest, clips: [...dest.clips, moved] }, moved.id, edit.fromStart)
+            : edit.fromStart;
+          this.#insertClip(edit.toTrackId, { ...moved, start });
+        }
+        break;
+      }
+    }
+  }
+
+  /** Rough byte size of a structural edit, for the history budget. */
+  #editBytes(edit: Edit): number {
+    if (edit.kind === 'buffer') return bufferBytes(edit.buffer);
+    if (edit.kind === 'add-clip') return bufferBytes(edit.clip.buffer);
+    if (edit.kind === 'remove-track')
+      return edit.track.clips.reduce((s, c) => s + bufferBytes(c.buffer), 0);
+    return 0; // move-across carries no buffer
+  }
+
+  /** The live BufferEdit snapshot to stash when undoing a buffer edit. */
+  #bufferTarget(edit: BufferEdit): BufferEdit {
+    const found = this.#findClip(edit.trackId, edit.clipId);
+    const clip = found?.clip;
+    return {
+      kind: 'buffer',
+      trackId: edit.trackId,
+      clipId: edit.clipId,
+      buffer: clip?.buffer ?? edit.buffer,
+      start: clip?.start,
+      trimStart: clip?.trimStart ?? 0,
+      trimEnd: clip?.trimEnd ?? 0,
+    };
+  }
+
+  /** A live buffer snapshot to satisfy History.redo's "current" arg for buffer edits, or null if no clips exist. */
+  #liveBufferProbe(): BufferEdit | null {
+    const sel = this.selectedClip;
     if (sel) {
-      const found = this.#findClip(sel.trackId, sel.clipId);
-      if (found)
+      const f = this.#findClip(sel.trackId, sel.clipId);
+      if (f)
         return {
+          kind: 'buffer',
           trackId: sel.trackId,
           clipId: sel.clipId,
-          buffer: found.clip.buffer,
-          start: found.clip.start,
+          buffer: f.clip.buffer,
+          start: f.clip.start,
+          trimStart: f.clip.trimStart ?? 0,
+          trimEnd: f.clip.trimEnd ?? 0,
         };
     }
-    for (const track of this.project.tracks) {
-      const clip = track.clips[0];
-      if (clip) return { trackId: track.id, clipId: clip.id, buffer: clip.buffer, start: clip.start };
+    for (const t of this.project.tracks) {
+      const c = t.clips[0];
+      if (c)
+        return {
+          kind: 'buffer',
+          trackId: t.id,
+          clipId: c.id,
+          buffer: c.buffer,
+          start: c.start,
+          trimStart: c.trimStart ?? 0,
+          trimEnd: c.trimEnd ?? 0,
+        };
     }
-    return undefined;
+    return null; // No clips — buffer-kind redo not applicable; caller handles null
   }
 
   #refreshHistoryFlags(): void {
@@ -457,8 +785,8 @@ export class Studio {
     // absolute on the timeline (clip origin + selection offset), matching the RAF position.
     const target = this.#selectedClip();
     if (target && target.sel.end > target.sel.start) {
-      this.seek(target.clip.start + target.sel.start); // seek() clears #playRangeEnd...
-      this.#playRangeEnd = target.clip.start + target.sel.end; // ...so set it after.
+      this.#seekTransport(target.clip.start + target.sel.start); // seek transport only, keep selection
+      this.#playRangeEnd = target.clip.start + target.sel.end; // set after seek clears it
     } else {
       this.#playRangeEnd = null;
     }
@@ -475,10 +803,15 @@ export class Studio {
     this.#playRangeEnd = null;
   }
 
-  seek(seconds: number): void {
+  /** Move the playhead WITHOUT touching the object-selection. Internal. */
+  #seekTransport(seconds: number): void {
     this.#transport.seek(seconds);
     this.playhead = seconds;
     this.#playRangeEnd = null;
+  }
+
+  seek(seconds: number): void {
+    this.#seekTransport(seconds);
     this.selectedClip = null;
   }
 

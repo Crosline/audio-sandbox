@@ -138,6 +138,7 @@ export class Transport {
       for (const clip of track.clips) {
         const trimStart = clip.trimStart ?? 0;
         const visible = clipDuration(clip);
+        if (visible <= 0) continue; // skip corrupt/zero-length clips
         const clipStart = clip.start;
         const clipEndPos = clipStart + visible;
         if (clipEndPos <= fromPosition) continue; // already past this clip

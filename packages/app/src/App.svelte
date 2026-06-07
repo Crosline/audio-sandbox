@@ -123,6 +123,61 @@
     }
   }
 
+  // Resolve the track under a clientY: an existing row id, 'new' for empty space below the
+  // last row, or null if above the first row / outside.
+  function trackAtY(clientY: number): string | 'new' | null {
+    const rows = scroller?.querySelectorAll<HTMLElement>('[data-track-id]') ?? [];
+    let lastBottom = -Infinity;
+    for (const row of rows) {
+      const r = row.getBoundingClientRect();
+      if (clientY >= r.top && clientY <= r.bottom) return row.dataset.trackId ?? null;
+      lastBottom = Math.max(lastBottom, r.bottom);
+    }
+    if (clientY > lastBottom && rows.length) return 'new';
+    return null;
+  }
+
+  function laneTimeAt(clientX: number): number {
+    if (!scroller) return 0;
+    const rect = scroller.getBoundingClientRect();
+    const laneX = clientX - rect.left - HEADER_W + scroller.scrollLeft;
+    return Math.max(0, studio.pxToTime(laneX));
+  }
+
+  function onClipDragMove(e: PointerEvent): void {
+    const drag = studio.clipDrag;
+    if (!drag) return;
+    const targetStart = laneTimeAt(e.clientX) - studio.pxToTime(drag.grabInClipPx);
+    // Live preview: move within the source track so the clip follows cursor x
+    studio.moveClip(drag.fromTrackId, drag.clipId, Math.max(0, targetStart));
+  }
+
+  function onClipDragUp(e: PointerEvent): void {
+    const drag = studio.clipDrag;
+    if (!drag) return;
+    const targetStart = Math.max(0, laneTimeAt(e.clientX) - studio.pxToTime(drag.grabInClipPx));
+    const over = trackAtY(e.clientY);
+    if (over === 'new') {
+      const fresh = studio.addTrack();
+      studio.moveClipToTrack(drag.fromTrackId, drag.clipId, fresh.id, targetStart, { createdTrackId: fresh.id });
+    } else if (over && over !== drag.fromTrackId) {
+      studio.moveClipToTrack(drag.fromTrackId, drag.clipId, over, targetStart);
+    } else {
+      studio.endClipMove(); // same-track drag already applied via preview
+    }
+    studio.clipDrag = null;
+  }
+
+  $effect(() => {
+    if (!studio.clipDrag) return;
+    window.addEventListener('pointermove', onClipDragMove);
+    window.addEventListener('pointerup', onClipDragUp);
+    return () => {
+      window.removeEventListener('pointermove', onClipDragMove);
+      window.removeEventListener('pointerup', onClipDragUp);
+    };
+  });
+
   // Editing keyboard shortcuts, scoped to the window. Skip when typing in a field so they
   // don't hijack text input.
   function onKeydown(e: KeyboardEvent): void {
