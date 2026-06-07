@@ -497,11 +497,47 @@ export class Studio {
     this.#editSelectedClip('Fade out', (buf, s, f) => fadeOutSeconds(buf, s.start, s.end, f), false);
   }
 
-  /** Paste the clipboard into the selected clip at the selection start. */
+  /**
+   * Paste the clipboard as a NEW clip at the playhead. Target track = the object-selected
+   * clip's track, else the last-interacted track, else a new track. If the playhead slot on
+   * the chosen track is occupied (clamping would shove the clip), create a new track instead.
+   */
   paste(): void {
     if (!this.#clipboard) return;
-    const clipboard = this.#clipboard;
-    this.#editSelectedClip('Paste', (buf, s, f) => insertBufferSeconds(buf, clipboard, s.start, f));
+    const at = this.playhead;
+    const newClip = createClip(this.#clipboard, 'Pasted', at);
+
+    // Choose the target track.
+    let target: Track | undefined =
+      (this.selectedClip && this.project.tracks.find((t) => t.id === this.selectedClip!.trackId)) ||
+      (this.lastTrackId ? this.project.tracks.find((t) => t.id === this.lastTrackId) : undefined) ||
+      undefined;
+
+    let placed: { trackId: string; clip: Clip };
+    if (target) {
+      const probe = { ...target, clips: [...target.clips, newClip] };
+      const start = clampClipStart(probe, newClip.id, at);
+      if (Math.abs(start - at) < 1e-6) {
+        placed = { trackId: target.id, clip: { ...newClip, start } };
+      } else {
+        // Slot occupied → new track instead.
+        const fresh = this.addTrack();
+        placed = { trackId: fresh.id, clip: { ...newClip, start: at } };
+      }
+    } else {
+      const fresh = this.addTrack();
+      placed = { trackId: fresh.id, clip: { ...newClip, start: at } };
+    }
+
+    this.#insertClip(placed.trackId, placed.clip);
+    this.#history.push(
+      'Paste clip',
+      { kind: 'add-clip', trackId: placed.trackId, clip: placed.clip },
+      bufferBytes(placed.clip.buffer),
+    );
+    this.lastTrackId = placed.trackId;
+    this.selectClip(placed.trackId, placed.clip.id);
+    this.#refreshHistoryFlags();
   }
 
   undo(): void {
