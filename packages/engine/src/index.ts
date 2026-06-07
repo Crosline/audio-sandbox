@@ -104,3 +104,14 @@ export {
 
 // io (encode rendered audio to file bytes)
 export { encodeWav, type WavOptions } from './io/index.js';
+
+// render (offline OfflineAudioContext mix-down + stems)
+export {
+  Renderer,
+  resolveRenderPlan,
+  type RenderOptions,
+  type RenderPlan,
+  type ScheduledClip,
+  type TrackOverride,
+  type TrackPlan,
+} from './render/index.js';
