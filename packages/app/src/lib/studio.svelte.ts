@@ -82,6 +82,8 @@ export class Studio {
   selection = $state<Selection | null>(null);
   /** A clip selected *as an object* (for move), distinct from the time-range `selection`. */
   selectedClip = $state<{ trackId: string; clipId: string } | null>(null);
+  /** The most recently interacted track (clicked clip, seeked lane, dropped file). */
+  lastTrackId = $state<string | null>(null);
   /** Mirrors of the history flags so buttons react. Refreshed after every edit/undo/redo. */
   canUndo = $state(false);
   canRedo = $state(false);
@@ -253,10 +255,16 @@ export class Studio {
     this.#playRangeEnd = null;
   }
 
-  /** Select a clip as an object (for moving). Mutually exclusive with the time-range selection. */
-  selectClip(trackId: string, clipId: string): void {
+  /**
+   * Select a clip as an object (for moving). Optionally seek the playhead to `atSeconds`
+   * (the clicked point) while KEEPING the clip selected. Mutually exclusive with the
+   * time-range selection.
+   */
+  selectClip(trackId: string, clipId: string, atSeconds?: number): void {
     this.clearSelection();
     this.selectedClip = { trackId, clipId };
+    this.lastTrackId = trackId;
+    if (atSeconds !== undefined) this.#seekTransport(atSeconds);
   }
 
   /** Clear the object-selection (e.g. when a range-select or seek takes over). */
@@ -457,8 +465,8 @@ export class Studio {
     // absolute on the timeline (clip origin + selection offset), matching the RAF position.
     const target = this.#selectedClip();
     if (target && target.sel.end > target.sel.start) {
-      this.seek(target.clip.start + target.sel.start); // seek() clears #playRangeEnd...
-      this.#playRangeEnd = target.clip.start + target.sel.end; // ...so set it after.
+      this.#seekTransport(target.clip.start + target.sel.start); // seek transport only, keep selection
+      this.#playRangeEnd = target.clip.start + target.sel.end; // set after seek clears it
     } else {
       this.#playRangeEnd = null;
     }
@@ -475,10 +483,15 @@ export class Studio {
     this.#playRangeEnd = null;
   }
 
-  seek(seconds: number): void {
+  /** Move the playhead WITHOUT touching the object-selection. Internal. */
+  #seekTransport(seconds: number): void {
     this.#transport.seek(seconds);
     this.playhead = seconds;
     this.#playRangeEnd = null;
+  }
+
+  seek(seconds: number): void {
+    this.#seekTransport(seconds);
     this.selectedClip = null;
   }
 

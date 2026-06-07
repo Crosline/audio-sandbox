@@ -92,8 +92,10 @@
       /* never captured */
     }
     if (!dragging && pressClipId) {
-      // Click on a clip → select it as an object.
-      studio.selectClip(track.id, pressClipId);
+      // Click on a clip → select it AND move the playhead to the exact clicked point.
+      const clip = track.clips.find((c) => c.id === pressClipId);
+      const atSeconds = clip ? clip.start + studio.pxToTime(grabInClip) : undefined;
+      studio.selectClip(track.id, pressClipId, atSeconds);
     }
     studio.endClipMove(); // close any drag-move gesture so its undo is one step
     dragging = false;
@@ -105,6 +107,7 @@
     if (e.button !== 0) return;
     studio.clearSelectedClip();
     studio.clearSelection();
+    studio.lastTrackId = track.id;
     studio.seek(studio.pxToTime(laneX(e)));
   }
 </script>
