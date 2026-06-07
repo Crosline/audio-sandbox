@@ -56,6 +56,8 @@ interface AddClipEdit {
   kind: 'add-clip';
   trackId: string;
   clip: Clip;
+  /** Set when paste() created a new track for this clip. Undo also removes that track. */
+  createdTrackId?: string;
 }
 /** A track was removed: undo re-inserts it at `index`, redo removes it again. */
 interface RemoveTrackEdit {
@@ -114,6 +116,9 @@ export class Studio {
   canRedo = $state(false);
   /** Reactive mirror of "is there something to paste?" (the clipboard itself isn't reactive). */
   canPaste = $state(false);
+
+  /** Active clip drag (set by the lane on drag-move start; consumed by the timeline surface). */
+  clipDrag = $state<{ fromTrackId: string; clipId: string; grabInClipPx: number } | null>(null);
 
   /** Bounded undo/redo of clip-buffer edits (see {@link HISTORY_LIMITS}). */
   readonly #history = new History<Edit>(HISTORY_LIMITS);
@@ -376,6 +381,37 @@ export class Studio {
   }
 
   /**
+   * Move a clip to another track at `desiredStart` (clamped no-overlap on the destination).
+   * If `toTrackId === fromTrackId`, delegates to the in-track {@link moveClip}. Undoable as a
+   * single `move-across` edit committed on drop (not coalesced).
+   */
+  moveClipToTrack(fromTrackId: string, clipId: string, toTrackId: string, desiredStart: number): void {
+    if (toTrackId === fromTrackId) {
+      this.moveClip(fromTrackId, clipId, desiredStart);
+      this.endClipMove();
+      return;
+    }
+    const from = this.#findClip(fromTrackId, clipId);
+    if (!from) return;
+    const fromStart = from.clip.start;
+    const moved = this.#removeClipFrom(fromTrackId, clipId);
+    if (!moved) return;
+    const dest = this.project.tracks.find((t) => t.id === toTrackId);
+    const start = dest
+      ? clampClipStart({ ...dest, clips: [...dest.clips, moved] }, moved.id, desiredStart)
+      : desiredStart;
+    this.#insertClip(toTrackId, { ...moved, start });
+    this.#history.push(
+      'Move clip to track',
+      { kind: 'move-across', clipId, fromTrackId, fromStart, toTrackId },
+      0,
+    );
+    this.lastTrackId = toTrackId;
+    this.selectClip(toTrackId, clipId);
+    this.#refreshHistoryFlags();
+  }
+
+  /**
    * Resize one edge of a clip non-destructively (sets trim; left edge also shifts start).
    * Undoable, coalesced into ONE history entry per drag gesture (like {@link moveClip}).
    * `desiredTrim` is the target trim amount (seconds) from that edge of the buffer.
@@ -513,7 +549,7 @@ export class Studio {
       (this.lastTrackId ? this.project.tracks.find((t) => t.id === this.lastTrackId) : undefined) ||
       undefined;
 
-    let placed: { trackId: string; clip: Clip };
+    let placed: { trackId: string; clip: Clip; createdTrackId?: string };
     if (target) {
       const probe = { ...target, clips: [...target.clips, newClip] };
       const start = clampClipStart(probe, newClip.id, at);
@@ -522,17 +558,17 @@ export class Studio {
       } else {
         // Slot occupied → new track instead.
         const fresh = this.addTrack();
-        placed = { trackId: fresh.id, clip: { ...newClip, start: at } };
+        placed = { trackId: fresh.id, clip: { ...newClip, start: at }, createdTrackId: fresh.id };
       }
     } else {
       const fresh = this.addTrack();
-      placed = { trackId: fresh.id, clip: { ...newClip, start: at } };
+      placed = { trackId: fresh.id, clip: { ...newClip, start: at }, createdTrackId: fresh.id };
     }
 
     // Record BEFORE mutating (consistent with moveClip, resizeClip, #editSelectedClip)
     this.#history.push(
       'Paste clip',
-      { kind: 'add-clip', trackId: placed.trackId, clip: placed.clip },
+      { kind: 'add-clip', trackId: placed.trackId, clip: placed.clip, createdTrackId: placed.createdTrackId },
       bufferBytes(placed.clip.buffer),
     );
     this.#insertClip(placed.trackId, placed.clip);
@@ -579,6 +615,10 @@ export class Studio {
     switch (edit.kind) {
       case 'add-clip':
         this.#removeClipFrom(edit.trackId, edit.clip.id);
+        if (edit.createdTrackId) {
+          // The paste created this track; undo must also remove it.
+          this.removeTrack(edit.createdTrackId, { record: false });
+        }
         break;
       case 'remove-track':
         this.#insertTrackAt(edit.track, edit.index);
@@ -595,6 +635,16 @@ export class Studio {
   #applyForward(edit: Exclude<Edit, BufferEdit>): void {
     switch (edit.kind) {
       case 'add-clip':
+        if (edit.createdTrackId) {
+          // Redo must recreate the track if it was created by paste.
+          // Only insert if not already present (idempotent guard).
+          if (!this.project.tracks.find((t) => t.id === edit.createdTrackId)) {
+            this.#insertTrackAt(
+              { id: edit.createdTrackId, name: 'Track', clips: [], gain: 1, pan: 0, muted: false, soloed: false },
+              this.project.tracks.length,
+            );
+          }
+        }
         this.#insertClip(edit.trackId, edit.clip);
         break;
       case 'remove-track':
