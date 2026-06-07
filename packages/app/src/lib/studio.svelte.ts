@@ -529,12 +529,13 @@ export class Studio {
       placed = { trackId: fresh.id, clip: { ...newClip, start: at } };
     }
 
-    this.#insertClip(placed.trackId, placed.clip);
+    // Record BEFORE mutating (consistent with moveClip, resizeClip, #editSelectedClip)
     this.#history.push(
       'Paste clip',
       { kind: 'add-clip', trackId: placed.trackId, clip: placed.clip },
       bufferBytes(placed.clip.buffer),
     );
+    this.#insertClip(placed.trackId, placed.clip);
     this.lastTrackId = placed.trackId;
     this.selectClip(placed.trackId, placed.clip.id);
     this.#refreshHistoryFlags();
@@ -557,12 +558,19 @@ export class Studio {
   }
 
   redo(): void {
-    const probe = this.#liveBufferProbe();
-    const restored = this.#history.redo(probe, probe ? bufferBytes(probe.buffer) : 0);
-    if (!restored) return;
-    const edit = restored.state as Edit;
-    if (edit.kind === 'buffer') this.#applyBufferEdit(edit);
-    else this.#applyForward(edit);
+    const top = this.#history.peekRedo();
+    if (!top) return;
+    const edit = top.state as Edit;
+    if (edit.kind === 'buffer') {
+      const probe = this.#liveBufferProbe();
+      if (!probe) return; // no clips to swap — shouldn't happen for buffer redo
+      const restored = this.#history.redo(probe, bufferBytes(probe.buffer));
+      if (restored) this.#applyBufferEdit(restored.state as BufferEdit);
+    } else {
+      // Structural: apply forward, then move the same entry to the undo stack.
+      this.#applyForward(edit);
+      this.#history.redo(edit, this.#editBytes(edit));
+    }
     this.#refreshHistoryFlags();
   }
 
@@ -630,8 +638,8 @@ export class Studio {
     };
   }
 
-  /** A live buffer snapshot to satisfy History.redo's "current" arg; the selected clip, else first. */
-  #liveBufferProbe(): BufferEdit {
+  /** A live buffer snapshot to satisfy History.redo's "current" arg for buffer edits, or null if no clips exist. */
+  #liveBufferProbe(): BufferEdit | null {
     const sel = this.selectedClip;
     if (sel) {
       const f = this.#findClip(sel.trackId, sel.clipId);
@@ -659,8 +667,7 @@ export class Studio {
           trimEnd: c.trimEnd ?? 0,
         };
     }
-    // No clips at all — a buffer-kind redo is impossible in this state; return a stub.
-    return { kind: 'buffer', trackId: '', clipId: '', buffer: undefined as unknown as AudioBuffer };
+    return null; // No clips — buffer-kind redo not applicable; caller handles null
   }
 
   #refreshHistoryFlags(): void {
