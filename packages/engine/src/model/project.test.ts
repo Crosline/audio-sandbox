@@ -168,3 +168,17 @@ describe('clipDuration / clipEnd', () => {
     expect(clipEnd(clip)).toBeCloseTo(2.65);
   });
 });
+
+describe('clampClipStart respects trim (visible duration)', () => {
+  const buf = () => makeMono(new Array(8000).fill(0), 8000); // 1.0s
+
+  it('a half-trimmed (0.5s) moving clip fits in a 0.5s gap', () => {
+    const left = createClip(buf(), 'L', 0); // occupies [0,1)
+    const right = createClip(buf(), 'R', 1.5); // occupies [1.5,2.5)
+    // moving clip is 1s buffer but trimmed to 0.5s visible
+    const moving = { ...createClip(buf(), 'M', 5), trimEnd: 0.5 };
+    const track = createTrack('t', [left, moving, right]);
+    // The [1.0,1.5) gap is exactly 0.5s — the trimmed clip fits flush at 1.0.
+    expect(clampClipStart(track, moving.id, 1.0)).toBeCloseTo(1.0);
+  });
+});

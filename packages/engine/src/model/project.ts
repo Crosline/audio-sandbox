@@ -87,7 +87,7 @@ export function projectDuration(project: Pick<Project, 'tracks'>): number {
   let end = 0;
   for (const track of project.tracks) {
     for (const clip of track.clips) {
-      end = Math.max(end, clip.start + clip.buffer.duration);
+      end = Math.max(end, clipEnd(clip));
     }
   }
   return end;
@@ -103,10 +103,10 @@ export function projectDuration(project: Pick<Project, 'tracks'>): number {
 export function clampClipStart(track: Track, clipId: Id, desiredStart: number): number {
   const moving = track.clips.find((c) => c.id === clipId);
   if (!moving) return Math.max(0, desiredStart);
-  const dur = moving.buffer.duration;
+  const dur = clipDuration(moving);
   const others = track.clips
     .filter((c) => c.id !== clipId)
-    .map((c) => ({ lo: c.start, hi: c.start + c.buffer.duration }))
+    .map((c) => ({ lo: c.start, hi: clipEnd(c) }))
     .sort((a, b) => a.lo - b.lo);
 
   // Does [s, s+dur) overlap any neighbor? Half-open intervals: touching edges is allowed.
