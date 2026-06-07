@@ -101,3 +101,19 @@ describe('History.peek', () => {
     expect(h.undo('b', 1)).toEqual({ state: 'a', label: 'e1' });
   });
 });
+
+describe('History.peekRedo', () => {
+  it('returns null when empty', () => {
+    const h = new History<string>(LIMITS);
+    expect(h.peekRedo()).toBeNull();
+  });
+
+  it('returns the top redo entry without popping', () => {
+    const h = new History<string>(LIMITS);
+    h.push('e1', 'a', 1);
+    // undo pops 'a' from undo and stashes the supplied current state ('b') onto redo
+    h.undo('b', 1);
+    expect(h.peekRedo()).toEqual({ state: 'b', label: 'e1' });
+    expect(h.canRedo).toBe(true); // not consumed
+  });
+});

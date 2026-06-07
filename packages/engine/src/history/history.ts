@@ -83,6 +83,12 @@ export class History<S> {
     return entry ? { state: entry.state, label: entry.label } : null;
   }
 
+  /** Look at the top redo entry (state + label) without removing it, or null if empty. */
+  peekRedo(): { state: S; label: string } | null {
+    const entry = this.#redo[this.#redo.length - 1];
+    return entry ? { state: entry.state, label: entry.label } : null;
+  }
+
   /** Drop all history. */
   clear(): void {
     this.#undo = [];
