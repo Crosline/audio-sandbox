@@ -13,8 +13,8 @@
 
   let { studio, track, color, onheightchange }: Props = $props();
 
-  // Track height: 96 (default) or 160 (expanded). Toggled by border-drag.
-  let trackHeight = $state<96 | 160>(96);
+  // Track height: 110 (default) or 160 (expanded). Toggled by border-drag.
+  let trackHeight = $state<110 | 160>(110);
 
   // Local copy of the track name for the editable input.
   let editName = $state(track.name);
@@ -69,7 +69,7 @@
   // Height resize gesture.
   let resizeHandleDown = false;
   let resizePressY = 0;
-  let resizePressHeight: 96 | 160 = 96;
+  let resizePressHeight: 110 | 160 = 110;
 
   function onResizeHandlePointerDown(e: PointerEvent): void {
     if (e.button !== 0) return;
@@ -84,7 +84,7 @@
     if (!resizeHandleDown) return;
     const dy = e.clientY - resizePressY;
     if (dy > 32) trackHeight = 160;
-    else if (dy < -32) trackHeight = 96;
+    else if (dy < -32) trackHeight = 110;
   }
 
   function onResizeHandlePointerUp(e: PointerEvent): void {
@@ -250,6 +250,7 @@
     <!-- Track header — pinned to the left while the lane scrolls horizontally. -->
     <div
       class="sticky left-0 z-20 flex w-52 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] group overflow-hidden"
+      style="height: {trackHeight}px"
     >
       <!-- Row 1: editable name + delete -->
       <div class="flex items-center gap-1 px-2 pt-2">
@@ -385,7 +386,7 @@
       {/each}
     </div>
   </div>
-  <!-- Resize handle: drag down >32px → 160px, drag up >32px → 96px -->
+  <!-- Resize handle: drag down >32px → 160px, drag up >32px → 110px -->
   <div
     class="h-1 cursor-ns-resize border-b border-[var(--color-border)]
            hover:bg-[var(--color-accent)]/30 transition-colors"
