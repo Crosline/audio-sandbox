@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { projectDuration, VERSION } from '@audiosandbox/engine';
   import EditButtons from './components/EditButtons.svelte';
+  import Minimap from './components/Minimap.svelte';
   import TimelineRuler from './components/TimelineRuler.svelte';
   import TrackRow from './components/TrackRow.svelte';
   import TransportBar from './components/TransportBar.svelte';
@@ -25,6 +26,16 @@
   let loadError = $state<string | null>(null);
   let fileInput: HTMLInputElement;
   let scroller: HTMLElement;
+
+  /** Current horizontal scroll offset of the timeline scroller (CSS px). */
+  let scrollerLeft = $state(0);
+
+  /** Track height map — populated by TrackRow onheightchange callbacks. */
+  let trackHeights = $state(new Map<string, number>());
+
+  function onTrackHeightChange(trackId: string, height: number): void {
+    trackHeights = new Map(trackHeights).set(trackId, height);
+  }
 
   // The waveform lane starts after the 176px (w-44) track header.
   const HEADER_W = 176;
@@ -300,6 +311,7 @@
     ondragleave={() => (dragging = false)}
     ondrop={onDrop}
     onwheel={onWheel}
+    onscroll={() => { scrollerLeft = scroller?.scrollLeft ?? 0; }}
   >
     {#if studio.project.tracks.length === 0}
       <div
@@ -322,7 +334,7 @@
       </div>
 
       {#each studio.project.tracks as track, i (track.id)}
-        <TrackRow {studio} {track} color={colorFor(i)} />
+        <TrackRow {studio} {track} color={colorFor(i)} onheightchange={onTrackHeightChange} />
       {/each}
 
       <!-- Playhead overlay: positioned in the scrolling content, so it moves with the lanes. -->
@@ -332,6 +344,17 @@
           style="left: {HEADER_W + studio.timeToPx(studio.playhead)}px"
         ></div>
       {/if}
+
+      <Minimap
+        project={studio.project}
+        pxPerSec={studio.pxPerSec}
+        totalDuration={duration}
+        scrollLeft={scrollerLeft}
+        viewportWidth={laneViewportWidth()}
+        {trackHeights}
+        trackColors={studio.project.tracks.map((_, i) => colorFor(i))}
+        onscroll={(sl) => { if (scroller) scroller.scrollLeft = Math.max(0, sl); }}
+      />
     {/if}
   </main>
 

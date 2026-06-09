@@ -8,9 +8,13 @@
     track: Track;
     /** Accent color for this track's waveform. */
     color: string;
+    /** Called whenever this track's display height snaps to a new value. */
+    onheightchange?: (trackId: string, height: number) => void;
   }
 
-  let { studio, track, color }: Props = $props();
+  let { studio, track, color, onheightchange }: Props = $props();
+
+  let trackHeight = $state<96 | 160>(96);
 
   // The track's full extent: the right edge of its furthest clip (trim-aware). 0 when empty.
   let laneWidth = $derived(
@@ -238,7 +242,13 @@
         onpointerdown={(e) => onClipPointerDown(e, clip)}
       >
         <div class="absolute inset-y-0" style="left: {-studio.timeToPx(clip.trimStart ?? 0)}px">
-          <Waveform buffer={clip.buffer} width={studio.timeToPx(clip.buffer.duration)} {color} height={96} />
+          <Waveform
+            buffer={clip.buffer}
+            width={studio.timeToPx(clip.buffer.duration)}
+            {color}
+            height={trackHeight ?? 96}
+            stereo={clip.buffer.numberOfChannels >= 2}
+          />
         </div>
         {#if selFor(clip.id)}
           {@const sel = selFor(clip.id)!}
