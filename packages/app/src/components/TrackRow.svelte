@@ -274,7 +274,7 @@
           class="h-1 flex-1 accent-[var(--color-accent)]"
           oninput={(e) => studio.setTrackGain(track.id, Number(e.currentTarget.value))}
         />
-        <span class="w-16 shrink-0 text-right text-[10px] tabular-nums text-[var(--color-muted)]">
+        <span class="w-16 shrink-0 text-left text-[10px] tabular-nums text-[var(--color-muted)]">
           {gainToDb(track.gain)}
         </span>
       </div>
@@ -291,7 +291,7 @@
           class="h-1 flex-1 accent-[var(--color-accent)]"
           oninput={(e) => onPanInput(Number(e.currentTarget.value))}
         />
-        <span class="w-10 shrink-0 text-right text-[10px] tabular-nums text-[var(--color-muted)]">
+        <span class="w-10 shrink-0 text-left text-[10px] tabular-nums text-[var(--color-muted)]">
           {panLabel(panValue)}
         </span>
       </div>
