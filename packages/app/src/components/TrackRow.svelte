@@ -52,6 +52,20 @@
     studio.setPan(track.id, snapped);
   }
 
+  function resetPan(): void {
+    panValue = 0;
+    studio.setPan(track.id, 0);
+  }
+
+  function onGainInput(raw: number): void {
+    const snapped = Math.abs(raw - 1) < 0.03 ? 1 : raw;
+    studio.setTrackGain(track.id, snapped);
+  }
+
+  function resetGain(): void {
+    studio.setTrackGain(track.id, 1);
+  }
+
   // Height resize gesture.
   let resizeHandleDown = false;
   let resizePressY = 0;
@@ -272,7 +286,8 @@
           step="0.01"
           value={track.gain}
           class="h-1 flex-1 accent-[var(--color-accent)]"
-          oninput={(e) => studio.setTrackGain(track.id, Number(e.currentTarget.value))}
+          oninput={(e) => onGainInput(Number(e.currentTarget.value))}
+          ondblclick={resetGain}
         />
         <span class="w-16 shrink-0 text-left text-[10px] tabular-nums text-[var(--color-muted)]">
           {gainToDb(track.gain)}
@@ -290,6 +305,7 @@
           value={panValue}
           class="h-1 flex-1 accent-[var(--color-accent)]"
           oninput={(e) => onPanInput(Number(e.currentTarget.value))}
+          ondblclick={resetPan}
         />
         <span class="w-10 shrink-0 text-left text-[10px] tabular-nums text-[var(--color-muted)]">
           {panLabel(panValue)}
