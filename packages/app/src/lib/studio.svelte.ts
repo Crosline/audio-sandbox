@@ -240,6 +240,19 @@ export class Studio {
     }
   }
 
+  renameTrack(trackId: string, name: string): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (t) this.updateTrack({ ...t, name });
+  }
+
+  setPan(trackId: string, pan: number): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (t) {
+      this.updateTrack({ ...t, pan });
+      this.#transport.applyTrackLevels();
+    }
+  }
+
   // ---- selection + editing ----
 
   /** Look up a clip by track + clip id, or undefined if it's gone. */
@@ -766,6 +779,14 @@ export class Studio {
       ? this.project.tracks.find((t) => t.id === opts.trackId)
       : undefined;
     if (!target) target = this.addTrack();
+
+    // Auto-rename an empty track to match the first file loaded onto it.
+    if (target.clips.length === 0) {
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      this.renameTrack(target.id, baseName);
+      // Re-fetch after mutation (updateTrack reassigns project).
+      target = this.project.tracks.find((t) => t.id === target!.id)!;
+    }
 
     // Build the clip, then clamp its start so it never overlaps existing clips on the track.
     const clip = createClip(audio, file.name, opts?.start ?? 0);

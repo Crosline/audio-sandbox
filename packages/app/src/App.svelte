@@ -37,8 +37,8 @@
     trackHeights = new Map(trackHeights).set(trackId, height);
   }
 
-  // The waveform lane starts after the 176px (w-44) track header.
-  const HEADER_W = 176;
+  // The waveform lane starts after the 208px (w-52) track header.
+  const HEADER_W = 208;
 
   // Total timeline width in px: project duration at the current scale. Lanes, ruler, and
   // playhead all live in this coordinate space, which may exceed the viewport (→ scroll).
@@ -196,6 +196,12 @@
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
       return;
     }
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (studio.transportState === 'playing') studio.pause();
+      else void studio.play();
+      return;
+    }
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault();
@@ -326,7 +332,7 @@
       <!-- Timeline ruler row: pinned label + scrolling tick ruler. -->
       <div class="flex border-b border-[var(--color-border)] bg-[var(--color-surface)]">
         <div
-          class="sticky left-0 z-20 flex w-44 shrink-0 items-center border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]"
+          class="sticky left-0 z-20 flex w-52 shrink-0 items-center border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[10px] uppercase tracking-wider text-[var(--color-muted)]"
         >
           Timeline
         </div>

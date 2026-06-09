@@ -11,7 +11,7 @@ import { writeTempWav, type WavOptions } from './wav.js';
  * waiting for "a canvas", so loading a second clip doesn't resolve against the first.
  */
 export async function loadGeneratedClip(page: Page, name: string, opts: WavOptions): Promise<void> {
-  const lanes = page.locator('main div.h-24:has(canvas)');
+  const lanes = page.locator('main [data-track-id]');
   const before = await lanes.count();
   const path = await writeTempWav(name, opts);
   await page.locator('input[type=file]').setInputFiles(path);
@@ -73,8 +73,12 @@ export function liveTrackGain(page: Page, trackId: string): Promise<number | und
 /** Widths (px) of the track waveform lanes, in DOM order. */
 export function laneWidths(page: Page): Promise<number[]> {
   return page.evaluate(() =>
-    [...document.querySelectorAll('main div.h-24')]
-      .filter((d) => d.querySelector('canvas'))
-      .map((d) => Math.round(d.getBoundingClientRect().width)),
+    [...document.querySelectorAll('main [data-track-id]')]
+      .map((row) => {
+        // The lane is the div with inline height style inside the row.
+        const lane = row.querySelector<HTMLElement>('div[style*="height"]');
+        return lane ? Math.round(lane.getBoundingClientRect().width) : 0;
+      })
+      .filter((w) => w > 0),
   );
 }

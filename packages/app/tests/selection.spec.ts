@@ -3,7 +3,7 @@ import { laneWidths, loadGeneratedClip } from './helpers/app.js';
 
 /** The first track's waveform lane (the drag/select surface). */
 function lane(page: Page) {
-  return page.locator('main div.h-24:has(canvas)').first();
+  return page.locator('main [data-track-id] div[style*="height"]').first();
 }
 
 /** Drag across the lane from xFrac→xFrac of its width to create a selection. */
@@ -68,7 +68,7 @@ test.describe('selection + editing', () => {
     const [original] = await laneWidths(page);
 
     await dragSelect(page, 0.25, 0.75); // ~half the clip
-    await page.getByRole('button', { name: 'Cut', exact: true }).click();
+    await page.keyboard.press('Control+x');
 
     const afterCut = (await laneWidths(page))[0]!;
     expect(afterCut).toBeLessThan(original! - 50);
@@ -136,12 +136,12 @@ test.describe('selection + editing', () => {
     await page.goto('/');
     await loadGeneratedClip(page, 'clip.wav', { seconds: 4 });
 
-    // No selection yet → Trim/Silence/Fades disabled.
-    await expect(page.getByRole('button', { name: 'Trim' })).toBeDisabled();
-    await expect(page.getByRole('button', { name: 'Silence' })).toBeDisabled();
+    // No selection yet → Copy/Silence disabled.
+    await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Insert Silence' })).toBeDisabled();
 
     await dragSelect(page, 0.2, 0.7);
-    await expect(page.getByRole('button', { name: 'Trim' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Silence' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Insert Silence' })).toBeEnabled();
   });
 });

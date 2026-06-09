@@ -48,6 +48,8 @@ export class Transport {
   #sources: ScheduledSource[] = [];
   /** Per-track gain node: clip sources → trackGain → master. Created lazily. */
   #trackGains = new Map<string, GainNode>();
+  /** Per-track stereo panner: trackGain → trackPanner → master. Created lazily. */
+  #trackPanners = new Map<string, StereoPannerNode>();
 
   /** Declick ramp time constant (seconds) for live gain changes — ~10 ms, no clicks. */
   static readonly #RAMP = 0.01;
@@ -174,6 +176,21 @@ export class Transport {
     return node;
   }
 
+  /** Get (creating + caching, wired trackGain → trackPanner → master) the panner for a track. */
+  #trackPanner(trackId: string): StereoPannerNode {
+    let node = this.#trackPanners.get(trackId);
+    if (!node) {
+      const gain = this.#trackGain(trackId);
+      // Rewire: gain was connected to master — disconnect it, insert panner between them.
+      gain.disconnect();
+      node = this.#ctx.context.createStereoPanner();
+      gain.connect(node);
+      node.connect(this.#ctx.master);
+      this.#trackPanners.set(trackId, node);
+    }
+    return node;
+  }
+
   /**
    * Recompute every track's live gain from the current model and ramp the per-track gain
    * nodes to it. Call after any mute / solo / volume change so it is heard immediately —
@@ -184,10 +201,9 @@ export class Transport {
     const soloed = anyTrackSoloed(project.tracks);
     const now = this.#ctx.currentTime;
     for (const track of project.tracks) {
-      const node = this.#trackGain(track.id);
       const target = trackTargetGain(track, soloed);
-      // Smooth ramp instead of an instant set — avoids clicks on mute/unmute/drag.
-      node.gain.setTargetAtTime(target, now, Transport.#RAMP);
+      this.#trackGain(track.id).gain.setTargetAtTime(target, now, Transport.#RAMP);
+      this.#trackPanner(track.id).pan.value = track.pan;
     }
   }
 
@@ -201,10 +217,15 @@ export class Transport {
 
   /** Release a removed track's gain node (disconnect + drop) to avoid a graph leak. */
   releaseTrack(trackId: string): void {
-    const node = this.#trackGains.get(trackId);
-    if (node) {
-      node.disconnect();
+    const gain = this.#trackGains.get(trackId);
+    if (gain) {
+      gain.disconnect();
       this.#trackGains.delete(trackId);
+    }
+    const panner = this.#trackPanners.get(trackId);
+    if (panner) {
+      panner.disconnect();
+      this.#trackPanners.delete(trackId);
     }
   }
 
@@ -230,6 +251,8 @@ export class Transport {
     this.#stopSources();
     for (const node of this.#trackGains.values()) node.disconnect();
     this.#trackGains.clear();
+    for (const node of this.#trackPanners.values()) node.disconnect();
+    this.#trackPanners.clear();
     this.events.clear();
   }
 }

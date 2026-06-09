@@ -1,8 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { makeWav } from './helpers/wav.js';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { writeFile } from 'node:fs/promises';
+import { writeTempWav } from './helpers/wav.js';
 
 /**
  * Build a stereo (2-channel interleaved) 16-bit PCM WAV in memory.
@@ -49,6 +46,9 @@ function makeStereoWav(seconds = 1, sampleRate = 44100): Uint8Array {
 }
 
 async function writeTempFile(name: string, data: Uint8Array): Promise<string> {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { writeFile } = await import('node:fs/promises');
   const path = join(tmpdir(), `audiosandbox-e2e-${Date.now()}-${name}`);
   await writeFile(path, data);
   return path;
@@ -56,14 +56,13 @@ async function writeTempFile(name: string, data: Uint8Array): Promise<string> {
 
 /**
  * Load a WAV file into the app via the hidden file input (creates a new track).
- * Waits until the new track's waveform lane has rendered.
+ * Waits until a track-id lane appears.
  */
 async function loadClip(page: Page, data: Uint8Array, name: string): Promise<void> {
-  const lanes = page.locator('main div.h-24:has(canvas)');
-  const before = await lanes.count();
+  const before = await page.locator('[data-track-id]').count();
   const path = await writeTempFile(name, data);
   await page.locator('input[type=file]').setInputFiles(path);
-  await expect(lanes).toHaveCount(before + 1);
+  await expect(page.locator('[data-track-id]')).toHaveCount(before + 1);
 }
 
 test.describe('timeline chrome', () => {
@@ -78,7 +77,10 @@ test.describe('timeline chrome', () => {
 
   test('mono buffer shows one canvas in a waveform', async ({ page }) => {
     await page.goto('/');
-    await loadClip(page, makeWav({ seconds: 1, sampleRate: 44100 }), 'mono.wav');
+    const path = await writeTempWav('mono.wav', { seconds: 1, sampleRate: 44100 });
+    const before = await page.locator('[data-track-id]').count();
+    await page.locator('input[type=file]').setInputFiles(path);
+    await expect(page.locator('[data-track-id]')).toHaveCount(before + 1);
     const clip = page.locator('[data-testid="clip"]').first();
     const canvases = clip.locator('canvas');
     await expect(canvases).toHaveCount(1);
@@ -86,21 +88,22 @@ test.describe('timeline chrome', () => {
 
   test('minimap appears after a track is added', async ({ page }) => {
     await page.goto('/');
-    await loadClip(page, makeWav({ seconds: 1, sampleRate: 44100 }), 'a.wav');
-    // Minimap canvas is the 200×48 one positioned bottom-right.
+    const path = await writeTempWav('a.wav', { seconds: 1 });
+    await page.locator('input[type=file]').setInputFiles(path);
+    await expect(page.locator('[data-track-id]')).toHaveCount(1);
     const minimap = page.locator('canvas[width="200"][height="48"]');
     await expect(minimap).toBeVisible();
   });
 
   test('clicking minimap scrolls the timeline', async ({ page }) => {
     await page.goto('/');
-    // Import a long file so the project extends beyond the viewport.
-    await loadClip(page, makeWav({ seconds: 30, sampleRate: 44100 }), 'long.wav');
+    const path = await writeTempWav('long.wav', { seconds: 30 });
+    await page.locator('input[type=file]').setInputFiles(path);
+    await expect(page.locator('[data-track-id]')).toHaveCount(1);
     const minimap = page.locator('canvas[width="200"][height="48"]');
     await expect(minimap).toBeVisible();
     const scroller = page.locator('main');
     const beforeScroll = await scroller.evaluate((el: HTMLElement) => el.scrollLeft);
-    // Click right side of minimap → should scroll right.
     await minimap.click({ position: { x: 180, y: 24 } });
     const afterScroll = await scroller.evaluate((el: HTMLElement) => el.scrollLeft);
     expect(afterScroll).toBeGreaterThan(beforeScroll);
