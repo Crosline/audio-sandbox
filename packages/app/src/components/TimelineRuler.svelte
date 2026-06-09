@@ -103,7 +103,7 @@
 <!-- The button spans the full content width; offsetX maps directly to time (x=0 → t=0). -->
 <button
   type="button"
-  class="block cursor-text border-b border-[var(--color-border)] bg-[var(--color-bg)] p-0"
+  class="block shrink-0 cursor-text border-b border-[var(--color-border)] bg-[var(--color-bg)] p-0"
   style="width: {width}px; height: {height}px"
   aria-label="Seek"
   title="Click to seek"
