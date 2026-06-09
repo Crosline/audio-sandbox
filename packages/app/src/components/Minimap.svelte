@@ -111,7 +111,7 @@
 
 {#if project.tracks.length > 0}
   <div
-    class="absolute bottom-3 right-3 z-30 overflow-hidden rounded-lg border border-[var(--color-border)]
+    class="fixed bottom-25 right-3 z-30 overflow-hidden rounded-lg border border-[var(--color-border)]
            bg-[var(--color-surface)]/85 backdrop-blur-sm"
     style="width: {W}px; height: {H}px"
   >
