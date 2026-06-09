@@ -241,7 +241,16 @@
       🎵
     </div>
     <h1 class="text-lg font-semibold tracking-tight">Audio Sandbox</h1>
-    <span class="text-sm text-[var(--color-muted)]">Untitled Project</span>
+    <span
+      class="cursor-text rounded px-1 text-sm text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] focus:bg-[var(--color-surface-2)] focus:text-[var(--color-text)] focus:outline-none"
+      role="textbox"
+      tabindex="0"
+      aria-label="Project name"
+      contenteditable="true"
+      spellcheck="false"
+      onblur={(e) => studio.renameProject(e.currentTarget.textContent ?? '')}
+      onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { e.currentTarget.textContent = studio.project.name; e.currentTarget.blur(); } }}
+    >{studio.project.name}</span>
 
     <!-- Edit controls: Cut/Copy/Paste/Delete/Silence/Trim/Fades · Undo/Redo. -->
     <div class="ml-4"><EditButtons {studio} /></div>

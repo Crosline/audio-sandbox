@@ -240,6 +240,10 @@ export class Studio {
     }
   }
 
+  renameProject(name: string): void {
+    this.project = { ...this.project, name: name.trim() || 'Untitled Project' };
+  }
+
   renameTrack(trackId: string, name: string): void {
     const t = this.project.tracks.find((x) => x.id === trackId);
     if (t) this.updateTrack({ ...t, name });
