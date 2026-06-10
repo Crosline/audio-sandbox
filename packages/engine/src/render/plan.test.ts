@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { defaultEffect } from '../effects/chain.js';
 import { createClip, createProject, createTrack } from '../model/project.js';
 import { makeMono } from '../test-helpers.js';
 import { resolveRenderPlan } from './plan.js';
@@ -23,6 +24,20 @@ describe('resolveRenderPlan — window + scheduling', () => {
     expect(plan.tracks).toHaveLength(1);
     expect(plan.tracks[0]!.clips).toHaveLength(1);
     expect(plan.tracks[0]!.clips[0]).toMatchObject({ when: 2, offset: 0, duration: 1 });
+  });
+
+  it('carries each track\'s effect chain into its TrackPlan verbatim', () => {
+    const fx = defaultEffect('filter');
+    const track = { ...createTrack('T1', [createClip(oneSec(), 'a', 0)]), effects: [fx] };
+    const plan = resolveRenderPlan(createProject('p', [track]));
+    expect(plan.tracks[0]!.effects).toEqual([fx]);
+  });
+
+  it('defaults a track with no effects field to an empty chain', () => {
+    const track: Track = { ...createTrack('T1', [createClip(oneSec(), 'a', 0)]) };
+    delete track.effects;
+    const plan = resolveRenderPlan(createProject('p', [track]));
+    expect(plan.tracks[0]!.effects).toEqual([]);
   });
 
   it('crops a clip that straddles the window start (offset into the buffer)', () => {

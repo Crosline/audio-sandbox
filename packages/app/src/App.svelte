@@ -3,6 +3,7 @@
   import { projectDuration, VERSION } from '@audiosandbox/engine';
   import EditButtons from './components/EditButtons.svelte';
   import Minimap from './components/Minimap.svelte';
+  import Pedalboard from './components/Pedalboard.svelte';
   import TimelineRuler from './components/TimelineRuler.svelte';
   import TrackRow from './components/TrackRow.svelte';
   import TransportBar from './components/TransportBar.svelte';
@@ -23,6 +24,7 @@
 
   let duration = $derived(projectDuration(studio.project));
   let dragging = $state(false);
+  let fxOpen = $state(false);
   let loadError = $state<string | null>(null);
   let fileInput: HTMLInputElement;
   let scroller: HTMLElement;
@@ -379,7 +381,11 @@
     </div>
   {/if}
 
-  <TransportBar {studio} />
+  {#if fxOpen}
+    <Pedalboard {studio} />
+  {/if}
+
+  <TransportBar {studio} {fxOpen} onToggleFx={() => (fxOpen = !fxOpen)} />
 
   <div class="px-5 pb-1 text-right text-[10px] text-[var(--color-muted)]">
     engine v{VERSION}

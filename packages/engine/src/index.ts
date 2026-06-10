@@ -41,6 +41,30 @@ export {
   trackTargetGain,
 } from './model/project.js';
 
+// effects (non-destructive pedalboard: pure model/math + node builder)
+export {
+  addEffect,
+  buildChain,
+  buildEffect,
+  defaultEffect,
+  distortionCurve,
+  moveEffect,
+  removeEffect,
+  updateEffect,
+  wetDryGains,
+  type BuiltChain,
+  type BuiltEffect,
+  type DelayEffect,
+  type DistortionEffect,
+  type EffectKind,
+  type EffectOfKind,
+  type EffectPatch,
+  type EffectState,
+  type EffectStateBase,
+  type EqEffect,
+  type FilterEffect,
+} from './effects/index.js';
+
 // analysis (waveform peaks, level meters, FFT taps)
 export {
   amplitudeToDb,

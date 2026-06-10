@@ -3,7 +3,7 @@ import { laneWidths, loadGeneratedClip } from './helpers/app.js';
 
 /** The first track's waveform lane (the drag/select surface). */
 function lane(page: Page) {
-  return page.locator('main [data-track-id] div[style*="height"]').first();
+  return page.locator('main [data-track-id] [data-lane]').first();
 }
 
 /** Drag across the lane from xFrac→xFrac of its width to create a selection. */

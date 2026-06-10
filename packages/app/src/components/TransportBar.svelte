@@ -4,9 +4,11 @@
 
   interface Props {
     studio: Studio;
+    fxOpen?: boolean;
+    onToggleFx?: () => void;
   }
 
-  let { studio }: Props = $props();
+  let { studio, fxOpen = false, onToggleFx }: Props = $props();
 
   let isPlaying = $derived(studio.transportState === 'playing');
   let sel = $derived(studio.selection);
@@ -68,4 +70,16 @@
       {studio.masterVolume}
     </span>
   </div>
+
+  <button
+    class="ml-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition {fxOpen
+      ? 'bg-[var(--color-accent)]/30 text-[var(--color-accent)]'
+      : 'bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:brightness-125'}"
+    title="{fxOpen ? 'Hide' : 'Show'} Pedalboard FX"
+    aria-label="{fxOpen ? 'Hide' : 'Show'} Pedalboard FX"
+    aria-pressed={fxOpen}
+    onclick={onToggleFx}
+  >
+    FX
+  </button>
 </div>

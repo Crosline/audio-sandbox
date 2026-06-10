@@ -9,8 +9,8 @@ export function createId(): Id {
   return crypto.randomUUID();
 }
 
-/** Default linear gain for a new track (unity — UI shows this as 100). */
-export const DEFAULT_GAIN = 0.8;
+/** Default linear gain for a new track: unity (1.0 → 0.0 dB). */
+export const DEFAULT_GAIN = 1.0;
 
 export function createClip(buffer: AudioBuffer, name: string, start = 0): Clip {
   return { id: createId(), buffer, name, start };
@@ -76,6 +76,7 @@ export function createTrack(name: string, clips: Clip[] = []): Track {
     pan: 0,
     muted: false,
     soloed: false,
+    effects: [],
   };
 }
 

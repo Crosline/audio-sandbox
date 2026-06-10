@@ -339,6 +339,7 @@
       bind:this={lane}
       class="relative bg-[var(--color-bg)] {track.clips.length ? 'cursor-text' : ''}"
       style="height: {trackHeight}px; width: {laneWidth}px"
+      data-lane
       role="presentation"
       onpointerdown={onLaneBackgroundDown}
       onpointermove={onPointerMove}

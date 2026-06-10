@@ -3,6 +3,7 @@
  * set, each track's effective gain, and each clip's scheduling (when/offset/duration) within
  * the window. No AudioContext — so all the logic the Renderer relies on is unit-testable.
  */
+import type { EffectState } from '../effects/types.js';
 import { anyTrackSoloed, isTrackAudible, projectDuration } from '../model/project.js';
 import type { Project, Track } from '../model/types.js';
 
@@ -46,6 +47,8 @@ export interface TrackPlan {
   /** Effective linear gain after solo/mute/unity/override resolution. */
   gain: number;
   clips: ScheduledClip[];
+  /** The track's pedalboard chain, carried verbatim so the renderer can re-instantiate it. */
+  effects: EffectState[];
 }
 
 /** The fully resolved render plan. */
@@ -116,7 +119,7 @@ export function resolveRenderPlan(
       const sched = scheduleClip(clip, start, end);
       if (sched) clips.push(sched);
     }
-    tracks.push({ trackId: track.id, gain, clips });
+    tracks.push({ trackId: track.id, gain, clips, effects: track.effects ?? [] });
   }
 
   return { sampleRate, channels, lengthSamples, start, end, tracks };

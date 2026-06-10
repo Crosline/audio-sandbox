@@ -70,13 +70,39 @@ export function liveTrackGain(page: Page, trackId: string): Promise<number | und
   }, trackId);
 }
 
+/** A track's effect chain (kind + bypass per effect) from the model, via the test hook. */
+export function trackEffects(
+  page: Page,
+  trackId: string,
+): Promise<{ id: string; kind: string; bypass: boolean }[]> {
+  return page.evaluate((id) => {
+    const studio = (
+      window as unknown as {
+        __studio: {
+          project: { tracks: { id: string; effects?: { id: string; kind: string; bypass: boolean }[] }[] };
+        };
+      }
+    ).__studio;
+    const t = studio.project.tracks.find((x) => x.id === id);
+    return (t?.effects ?? []).map((e) => ({ id: e.id, kind: e.kind, bypass: e.bypass }));
+  }, trackId);
+}
+
+/** Whether a track has a non-empty LIVE effect chain (the built audio nodes), via the hook. */
+export function liveTrackHasEffects(page: Page, trackId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const studio = (window as unknown as { __studio: { liveTrackHasEffects(id: string): boolean } })
+      .__studio;
+    return studio.liveTrackHasEffects(id);
+  }, trackId);
+}
+
 /** Widths (px) of the track waveform lanes, in DOM order. */
 export function laneWidths(page: Page): Promise<number[]> {
   return page.evaluate(() =>
     [...document.querySelectorAll('main [data-track-id]')]
       .map((row) => {
-        // The lane is the div with inline height style inside the row.
-        const lane = row.querySelector<HTMLElement>('div[style*="height"]');
+        const lane = row.querySelector<HTMLElement>('[data-lane]');
         return lane ? Math.round(lane.getBoundingClientRect().width) : 0;
       })
       .filter((w) => w > 0),

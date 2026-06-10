@@ -10,8 +10,10 @@
  */
 import { Emitter } from '../core/emitter.js';
 import type { EngineContext } from '../core/engine-context.js';
+import { buildChain, type BuiltChain } from '../effects/nodes.js';
+import type { EffectState } from '../effects/types.js';
 import { anyTrackSoloed, clipDuration, clipEnd, trackTargetGain } from '../model/project.js';
-import type { Project } from '../model/types.js';
+import type { Project, Track } from '../model/types.js';
 import {
   clampSeek,
   currentPosition,
@@ -46,9 +48,11 @@ export class Transport {
   #anchor: PlayAnchor | null = null;
   #loop: LoopRegion | null = null;
   #sources: ScheduledSource[] = [];
-  /** Per-track gain node: clip sources → trackGain → master. Created lazily. */
+  /** Per-track gain node, the head of a track's graph. Created lazily. */
   #trackGains = new Map<string, GainNode>();
-  /** Per-track stereo panner: trackGain → trackPanner → master. Created lazily. */
+  /** Per-track pedalboard chain: trackGain → chain → trackPanner. Created lazily. */
+  #trackChains = new Map<string, BuiltChain>();
+  /** Per-track stereo panner: chain → trackPanner → master. Created lazily. */
   #trackPanners = new Map<string, StereoPannerNode>();
 
   /** Declick ramp time constant (seconds) for live gain changes — ~10 ms, no clicks. */
@@ -136,7 +140,7 @@ export class Transport {
       // Audibility is now carried by the per-track gain node (set via applyTrackLevels),
       // so we schedule sources for every track and let the live gain mute/solo them. This
       // is what lets mute/solo/volume changes take effect mid-playback.
-      const trackGain = this.#trackGain(track.id);
+      const trackGain = this.#ensureTrackGraph(track.id, track.effects ?? []);
       for (const clip of track.clips) {
         const trimStart = clip.trimStart ?? 0;
         const visible = clipDuration(clip);
@@ -165,30 +169,72 @@ export class Transport {
     this.applyTrackLevels();
   }
 
-  /** Get (creating + caching, and wiring to master) the gain node for a track. */
-  #trackGain(trackId: string): GainNode {
-    let node = this.#trackGains.get(trackId);
-    if (!node) {
-      node = this.#ctx.context.createGain();
-      node.connect(this.#ctx.master);
-      this.#trackGains.set(trackId, node);
-    }
-    return node;
+  /**
+   * Ensure a track's full graph exists and is wired: gain → chain → panner → master. Created
+   * lazily and cached; `effects` seeds the chain on first build. Returns the head gain node.
+   */
+  #ensureTrackGraph(trackId: string, effects: readonly EffectState[] = []): GainNode {
+    let gain = this.#trackGains.get(trackId);
+    if (gain) return gain;
+    const ctx = this.#ctx.context;
+    gain = ctx.createGain();
+    const chain = buildChain(ctx, effects);
+    const panner = ctx.createStereoPanner();
+    gain.connect(chain.input);
+    chain.output.connect(panner);
+    panner.connect(this.#ctx.master);
+    this.#trackGains.set(trackId, gain);
+    this.#trackChains.set(trackId, chain);
+    this.#trackPanners.set(trackId, panner);
+    return gain;
   }
 
-  /** Get (creating + caching, wired trackGain → trackPanner → master) the panner for a track. */
+  /** Get (creating if needed) the head gain node for a track. */
+  #trackGain(trackId: string): GainNode {
+    return this.#ensureTrackGraph(trackId);
+  }
+
+  /** Get (creating the graph if needed) the panner for a track. */
   #trackPanner(trackId: string): StereoPannerNode {
-    let node = this.#trackPanners.get(trackId);
-    if (!node) {
-      const gain = this.#trackGain(trackId);
-      // Rewire: gain was connected to master — disconnect it, insert panner between them.
-      gain.disconnect();
-      node = this.#ctx.context.createStereoPanner();
-      gain.connect(node);
-      node.connect(this.#ctx.master);
-      this.#trackPanners.set(trackId, node);
+    this.#ensureTrackGraph(trackId);
+    return this.#trackPanners.get(trackId)!;
+  }
+
+  /**
+   * Rebuild (or param-update) a track's pedalboard chain from the model. Splices the new chain
+   * back into gain → chain → panner. A full rebuild handles add/remove/reorder; pass
+   * `paramsOnly` to update existing nodes in place (slider drags) without reconnecting.
+   */
+  applyTrackEffects(track: Pick<Track, 'id' | 'effects'>, paramsOnly = false): void {
+    const effects = track.effects ?? [];
+    const existing = this.#trackChains.get(track.id);
+    // No graph yet → build it lazily with this chain (e.g. editing before first play).
+    if (!existing) {
+      this.#ensureTrackGraph(track.id, effects);
+      return;
     }
-    return node;
+    if (paramsOnly && existing.effects.length === effects.length) {
+      // Same shape: update params in place (declicked), no reconnection.
+      for (let i = 0; i < effects.length; i++) {
+        if (existing.effects[i]!.id === effects[i]!.id) existing.effects[i]!.update(effects[i]!);
+      }
+      return;
+    }
+    // Structural change: build a fresh chain and splice it between gain and panner.
+    const ctx = this.#ctx.context;
+    const gain = this.#trackGains.get(track.id)!;
+    const panner = this.#trackPanners.get(track.id)!;
+    const next = buildChain(ctx, effects);
+    gain.disconnect();
+    existing.dispose();
+    gain.connect(next.input);
+    next.output.connect(panner);
+    this.#trackChains.set(track.id, next);
+  }
+
+  /** Whether a track currently has a non-empty live effect chain (read-only, for E2E). */
+  liveTrackHasEffects(trackId: string): boolean {
+    return (this.#trackChains.get(trackId)?.effects.length ?? 0) > 0;
   }
 
   /**
@@ -222,6 +268,11 @@ export class Transport {
       gain.disconnect();
       this.#trackGains.delete(trackId);
     }
+    const chain = this.#trackChains.get(trackId);
+    if (chain) {
+      chain.dispose();
+      this.#trackChains.delete(trackId);
+    }
     const panner = this.#trackPanners.get(trackId);
     if (panner) {
       panner.disconnect();
@@ -251,6 +302,8 @@ export class Transport {
     this.#stopSources();
     for (const node of this.#trackGains.values()) node.disconnect();
     this.#trackGains.clear();
+    for (const chain of this.#trackChains.values()) chain.dispose();
+    this.#trackChains.clear();
     for (const node of this.#trackPanners.values()) node.disconnect();
     this.#trackPanners.clear();
     this.events.clear();

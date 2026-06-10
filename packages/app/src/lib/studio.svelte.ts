@@ -7,6 +7,7 @@
  * Svelte-side embodiment of the engine/app boundary.
  */
 import {
+  addEffect,
   clampClipStart,
   clipDuration,
   copySeconds,
@@ -20,13 +21,19 @@ import {
   fadeOutSeconds,
   History,
   insertBufferSeconds,
+  moveEffect,
   projectDuration,
+  removeEffect,
   resizeClip,
   silenceRegionSeconds,
   Transport,
   trimSeconds,
+  updateEffect,
   type BufferFactory,
   type Clip,
+  type EffectKind,
+  type EffectPatch,
+  type EffectState,
   type Project,
   type Track,
 } from '@audiosandbox/engine';
@@ -75,7 +82,13 @@ interface MoveAcrossEdit {
   /** Set when a new track was created for this move. Undo also removes that track. */
   createdTrackId?: string;
 }
-type Edit = BufferEdit | AddClipEdit | RemoveTrackEdit | MoveAcrossEdit;
+/** A track's effect chain changed: undo/redo swap the whole (small) array back. */
+interface EffectsEdit {
+  kind: 'effects';
+  trackId: string;
+  before: EffectState[];
+}
+type Edit = BufferEdit | AddClipEdit | RemoveTrackEdit | MoveAcrossEdit | EffectsEdit;
 
 /** Rough byte size of an AudioBuffer (Float32 samples), for the history budget. */
 function bufferBytes(buffer: AudioBuffer): number {
@@ -130,6 +143,8 @@ export class Studio {
   #movingClipId: string | null = null;
   /** The clip currently being drag-resized, so its resizes coalesce into one history entry. */
   #resizingClipId: string | null = null;
+  /** The effect whose param is being drag-edited, so its updates coalesce into one history entry. */
+  #editingEffectId: string | null = null;
   /**
    * Absolute timeline second at which a selection-audition should stop, or null when
    * playing the whole project. Read by the RAF loop; set by {@link play}.
@@ -255,6 +270,95 @@ export class Studio {
       this.updateTrack({ ...t, pan });
       this.#transport.applyTrackLevels();
     }
+  }
+
+  // ---- pedalboard effects ----
+
+  /** The track whose pedalboard the UI shows: the last-interacted track, else the first. */
+  get pedalboardTrack(): Track | null {
+    if (this.lastTrackId) {
+      const t = this.project.tracks.find((x) => x.id === this.lastTrackId);
+      if (t) return t;
+    }
+    return this.project.tracks[0] ?? null;
+  }
+
+  /**
+   * Replace a track's effect chain in the model and re-instantiate its live graph. Records an
+   * undo entry snapshotting the PRIOR chain unless `record` is false (used by undo/redo).
+   * `paramsOnly` updates the live nodes in place (slider drags) instead of rebuilding.
+   */
+  #setTrackEffects(
+    trackId: string,
+    next: EffectState[],
+    opts?: { record?: boolean; paramsOnly?: boolean },
+  ): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    if (opts?.record !== false) {
+      this.#history.push('Edit effects', { kind: 'effects', trackId, before: t.effects ?? [] }, 0);
+    }
+    this.updateTrack({ ...t, effects: next });
+    const updated = this.project.tracks.find((x) => x.id === trackId)!;
+    this.#transport.applyTrackEffects(updated, opts?.paramsOnly ?? false);
+    if (opts?.record !== false) this.#refreshHistoryFlags();
+  }
+
+  addEffect(trackId: string, kind: EffectKind): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    this.lastTrackId = trackId;
+    this.#setTrackEffects(trackId, addEffect(t.effects ?? [], kind));
+  }
+
+  removeEffect(trackId: string, effectId: string): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    this.#setTrackEffects(trackId, removeEffect(t.effects ?? [], effectId));
+  }
+
+  moveEffect(trackId: string, effectId: string, dir: 'up' | 'down'): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    this.#setTrackEffects(trackId, moveEffect(t.effects ?? [], effectId, dir));
+  }
+
+  /**
+   * Patch one effect's params. Param drags fire this repeatedly; we coalesce them into ONE
+   * history entry per gesture (like {@link moveClip}) via {@link #editingEffectId}, and update
+   * the live nodes in place so dragging a knob doesn't rebuild/click. Call {@link endEffectEdit}
+   * on pointerup to close the gesture.
+   */
+  updateEffect(trackId: string, effectId: string, patch: EffectPatch): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    if (!t) return;
+    const continuing = this.#editingEffectId === effectId;
+    if (!continuing) {
+      this.#history.push(
+        'Edit effects',
+        { kind: 'effects', trackId, before: t.effects ?? [] },
+        0,
+      );
+      this.#editingEffectId = effectId;
+    }
+    this.#setTrackEffects(trackId, updateEffect(t.effects ?? [], effectId, patch), {
+      record: false,
+      paramsOnly: true,
+    });
+    this.#refreshHistoryFlags();
+  }
+
+  /** Toggle an effect's bypass. Discrete (not coalesced) — each toggle is its own undo entry. */
+  toggleEffectBypass(trackId: string, effectId: string): void {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    const fx = t?.effects?.find((e) => e.id === effectId);
+    if (!t || !fx) return;
+    this.#setTrackEffects(trackId, updateEffect(t.effects ?? [], effectId, { bypass: !fx.bypass }));
+  }
+
+  /** End a param-drag gesture so the next {@link updateEffect} opens a fresh undo entry. */
+  endEffectEdit(): void {
+    this.#editingEffectId = null;
   }
 
   // ---- selection + editing ----
@@ -611,6 +715,11 @@ export class Studio {
       const target = this.#bufferTarget(edit);
       const restored = this.#history.undo(target, bufferBytes(target.buffer));
       if (restored) this.#applyBufferEdit(restored.state as BufferEdit);
+    } else if (edit.kind === 'effects') {
+      // Swap: stash the live chain (for redo), restore the snapshotted prior chain.
+      const live: EffectsEdit = { kind: 'effects', trackId: edit.trackId, before: this.#liveEffects(edit.trackId) };
+      const restored = this.#history.undo(live, 0);
+      if (restored) this.#applyEffectsEdit(restored.state as EffectsEdit);
     } else {
       // Structural: apply the inverse, then move the same entry to the redo stack.
       this.#applyInverse(edit);
@@ -628,6 +737,10 @@ export class Studio {
       if (!probe) return; // no clips to swap — shouldn't happen for buffer redo
       const restored = this.#history.redo(probe, bufferBytes(probe.buffer));
       if (restored) this.#applyBufferEdit(restored.state as BufferEdit);
+    } else if (edit.kind === 'effects') {
+      const live: EffectsEdit = { kind: 'effects', trackId: edit.trackId, before: this.#liveEffects(edit.trackId) };
+      const restored = this.#history.redo(live, 0);
+      if (restored) this.#applyEffectsEdit(restored.state as EffectsEdit);
     } else {
       // Structural: apply forward, then move the same entry to the undo stack.
       this.#applyForward(edit);
@@ -636,8 +749,19 @@ export class Studio {
     this.#refreshHistoryFlags();
   }
 
+  /** The live effect chain for a track (a copy, for snapshotting), or [] if the track is gone. */
+  #liveEffects(trackId: string): EffectState[] {
+    const t = this.project.tracks.find((x) => x.id === trackId);
+    return t ? [...(t.effects ?? [])] : [];
+  }
+
+  /** Apply a restored EffectsEdit: write the chain back to the model + rebuild the live graph. */
+  #applyEffectsEdit(edit: EffectsEdit): void {
+    this.#setTrackEffects(edit.trackId, edit.before, { record: false });
+  }
+
   /** Apply the UNDO direction of a structural edit. */
-  #applyInverse(edit: Exclude<Edit, BufferEdit>): void {
+  #applyInverse(edit: Exclude<Edit, BufferEdit | EffectsEdit>): void {
     switch (edit.kind) {
       case 'add-clip':
         this.#removeClipFrom(edit.trackId, edit.clip.id);
@@ -661,7 +785,7 @@ export class Studio {
   }
 
   /** Apply the REDO direction of a structural edit. */
-  #applyForward(edit: Exclude<Edit, BufferEdit>): void {
+  #applyForward(edit: Exclude<Edit, BufferEdit | EffectsEdit>): void {
     switch (edit.kind) {
       case 'add-clip':
         if (edit.createdTrackId) {
@@ -843,6 +967,11 @@ export class Studio {
   /** Read a track's live gain-node value (for verification / E2E). Undefined if unwired. */
   liveTrackGain(trackId: string): number | undefined {
     return this.#transport.liveTrackGain(trackId);
+  }
+
+  /** Whether a track currently has a non-empty live effect chain (for verification / E2E). */
+  liveTrackHasEffects(trackId: string): boolean {
+    return this.#transport.liveTrackHasEffects(trackId);
   }
 
   setMasterVolume(volume0to100: number): void {

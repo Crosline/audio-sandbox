@@ -8,6 +8,7 @@
  *
  * Graph per render: for each track plan, clip sources → trackGain(plan.gain) → destination.
  */
+import { buildChain } from '../effects/nodes.js';
 import type { Project } from '../model/types.js';
 import { resolveRenderPlan, type RenderOptions, type RenderPlan } from './plan.js';
 
@@ -53,7 +54,12 @@ export class Renderer {
     for (const track of plan.tracks) {
       const trackGain = ctx.createGain();
       trackGain.gain.value = track.gain;
-      trackGain.connect(ctx.destination);
+
+      // Re-instantiate the pedalboard chain in THIS offline context (nodes can't cross
+      // contexts). Empty chains build a passthrough, so this wiring is uniform.
+      const chain = buildChain(ctx, track.effects);
+      trackGain.connect(chain.input);
+      chain.output.connect(ctx.destination);
 
       for (const clip of track.clips) {
         const source = ctx.createBufferSource();
