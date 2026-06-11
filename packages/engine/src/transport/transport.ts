@@ -48,12 +48,14 @@ export class Transport {
   #anchor: PlayAnchor | null = null;
   #loop: LoopRegion | null = null;
   #sources: ScheduledSource[] = [];
-  /** Per-track gain node, the head of a track's graph. Created lazily. */
+  /** Per-track fader gain: chain → gain → trackPanner. Created lazily. */
   #trackGains = new Map<string, GainNode>();
-  /** Per-track pedalboard chain: trackGain → chain → trackPanner. Created lazily. */
+  /** Per-track pedalboard chain: head → chain → gain. Created lazily. */
   #trackChains = new Map<string, BuiltChain>();
-  /** Per-track stereo panner: chain → trackPanner → master. Created lazily. */
+  /** Per-track stereo panner: gain → trackPanner → master. Created lazily. */
   #trackPanners = new Map<string, StereoPannerNode>();
+  /** Per-track graph head — the node that sources connect to. After fader flip = chain.input. */
+  #trackHeads = new Map<string, AudioNode>();
 
   /** Declick ramp time constant (seconds) for live gain changes — ~10 ms, no clicks. */
   static readonly #RAMP = 0.01;
@@ -140,7 +142,7 @@ export class Transport {
       // Audibility is now carried by the per-track gain node (set via applyTrackLevels),
       // so we schedule sources for every track and let the live gain mute/solo them. This
       // is what lets mute/solo/volume changes take effect mid-playback.
-      const trackGain = this.#ensureTrackGraph(track.id, track.effects ?? []);
+      const head = this.#ensureTrackGraph(track.id, track.effects ?? []);
       for (const clip of track.clips) {
         const trimStart = clip.trimStart ?? 0;
         const visible = clipDuration(clip);
@@ -151,7 +153,7 @@ export class Transport {
 
         const node = ctx.createBufferSource();
         node.buffer = clip.buffer;
-        node.connect(trackGain);
+        node.connect(head);
 
         if (fromPosition <= clipStart) {
           // Clip begins in the future: start after the lead-in, read the trimmed window.
@@ -170,28 +172,32 @@ export class Transport {
   }
 
   /**
-   * Ensure a track's full graph exists and is wired: gain → chain → panner → master. Created
-   * lazily and cached; `effects` seeds the chain on first build. Returns the head gain node.
+   * Ensure a track's full graph exists and is wired: chain → gain → panner → master (post-fader).
+   * Created lazily and cached; `effects` seeds the chain on first build. Returns the head node
+   * (chain.input) — the node sources connect to.
    */
-  #ensureTrackGraph(trackId: string, effects: readonly EffectState[] = []): GainNode {
-    let gain = this.#trackGains.get(trackId);
-    if (gain) return gain;
+  #ensureTrackGraph(trackId: string, effects: readonly EffectState[] = []): AudioNode {
+    let head = this.#trackHeads.get(trackId);
+    if (head) return head;
     const ctx = this.#ctx.context;
-    gain = ctx.createGain();
+    const gain = ctx.createGain();
     const chain = buildChain(ctx, effects);
     const panner = ctx.createStereoPanner();
-    gain.connect(chain.input);
-    chain.output.connect(panner);
+    // Post-fader: source → chain → gain → panner → master
+    chain.output.connect(gain);
+    gain.connect(panner);
     panner.connect(this.#ctx.master);
+    this.#trackHeads.set(trackId, chain.input);
     this.#trackGains.set(trackId, gain);
     this.#trackChains.set(trackId, chain);
     this.#trackPanners.set(trackId, panner);
-    return gain;
+    return chain.input;
   }
 
-  /** Get (creating if needed) the head gain node for a track. */
+  /** Get (creating the graph if needed) the gain node for a track (for gain-control use). */
   #trackGain(trackId: string): GainNode {
-    return this.#ensureTrackGraph(trackId);
+    this.#ensureTrackGraph(trackId);
+    return this.#trackGains.get(trackId)!;
   }
 
   /** Get (creating the graph if needed) the panner for a track. */
@@ -202,8 +208,8 @@ export class Transport {
 
   /**
    * Rebuild (or param-update) a track's pedalboard chain from the model. Splices the new chain
-   * back into gain → chain → panner. A full rebuild handles add/remove/reorder; pass
-   * `paramsOnly` to update existing nodes in place (slider drags) without reconnecting.
+   * back into chain → gain → panner (post-fader). A full rebuild handles add/remove/reorder;
+   * pass `paramsOnly` to update existing nodes in place (slider drags) without reconnecting.
    */
   applyTrackEffects(track: Pick<Track, 'id' | 'effects'>, paramsOnly = false): void {
     const effects = track.effects ?? [];
@@ -220,16 +226,18 @@ export class Transport {
       }
       return;
     }
-    // Structural change: build a fresh chain and splice it between gain and panner.
+    // Structural change: dispose old chain; wire new chain between head and gain.
+    // gain → panner stays connected — only the chain segment changes.
     const ctx = this.#ctx.context;
     const gain = this.#trackGains.get(track.id)!;
-    const panner = this.#trackPanners.get(track.id)!;
     const next = buildChain(ctx, effects);
-    gain.disconnect();
     existing.dispose();
-    gain.connect(next.input);
-    next.output.connect(panner);
+    next.output.connect(gain);
     this.#trackChains.set(track.id, next);
+    this.#trackHeads.set(track.id, next.input);
+    // Note: sources scheduled in the current playback pass still connect to the old head.
+    // They will continue playing through the old (now-disposed) chain until the next play.
+    // This pre-existing limitation is unchanged by the fader flip.
   }
 
   /** Whether a track currently has a non-empty live effect chain (read-only, for E2E). */
@@ -278,6 +286,7 @@ export class Transport {
       panner.disconnect();
       this.#trackPanners.delete(trackId);
     }
+    this.#trackHeads.delete(trackId);
   }
 
   #stopSources(): void {
@@ -306,6 +315,7 @@ export class Transport {
     this.#trackChains.clear();
     for (const node of this.#trackPanners.values()) node.disconnect();
     this.#trackPanners.clear();
+    this.#trackHeads.clear();
     this.events.clear();
   }
 }

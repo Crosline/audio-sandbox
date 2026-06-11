@@ -46,6 +46,8 @@ export interface TrackPlan {
   trackId: string;
   /** Effective linear gain after solo/mute/unity/override resolution. */
   gain: number;
+  /** Stereo pan position -1 (L) .. 0 (C) .. +1 (R), from the track model. */
+  pan: number;
   clips: ScheduledClip[];
   /** The track's pedalboard chain, carried verbatim so the renderer can re-instantiate it. */
   effects: EffectState[];
@@ -119,7 +121,7 @@ export function resolveRenderPlan(
       const sched = scheduleClip(clip, start, end);
       if (sched) clips.push(sched);
     }
-    tracks.push({ trackId: track.id, gain, clips, effects: track.effects ?? [] });
+    tracks.push({ trackId: track.id, gain, pan: track.pan ?? 0, clips, effects: track.effects ?? [] });
   }
 
   return { sampleRate, channels, lengthSamples, start, end, tracks };

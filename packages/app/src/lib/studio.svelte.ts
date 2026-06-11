@@ -733,9 +733,8 @@ export class Studio {
     if (!top) return;
     const edit = top.state as Edit;
     if (edit.kind === 'buffer') {
-      const probe = this.#liveBufferProbe();
-      if (!probe) return; // no clips to swap — shouldn't happen for buffer redo
-      const restored = this.#history.redo(probe, bufferBytes(probe.buffer));
+      const target = this.#bufferTarget(edit);
+      const restored = this.#history.redo(target, bufferBytes(target.buffer));
       if (restored) this.#applyBufferEdit(restored.state as BufferEdit);
     } else if (edit.kind === 'effects') {
       const live: EffectsEdit = { kind: 'effects', trackId: edit.trackId, before: this.#liveEffects(edit.trackId) };
@@ -849,38 +848,6 @@ export class Studio {
       trimStart: clip?.trimStart ?? 0,
       trimEnd: clip?.trimEnd ?? 0,
     };
-  }
-
-  /** A live buffer snapshot to satisfy History.redo's "current" arg for buffer edits, or null if no clips exist. */
-  #liveBufferProbe(): BufferEdit | null {
-    const sel = this.selectedClip;
-    if (sel) {
-      const f = this.#findClip(sel.trackId, sel.clipId);
-      if (f)
-        return {
-          kind: 'buffer',
-          trackId: sel.trackId,
-          clipId: sel.clipId,
-          buffer: f.clip.buffer,
-          start: f.clip.start,
-          trimStart: f.clip.trimStart ?? 0,
-          trimEnd: f.clip.trimEnd ?? 0,
-        };
-    }
-    for (const t of this.project.tracks) {
-      const c = t.clips[0];
-      if (c)
-        return {
-          kind: 'buffer',
-          trackId: t.id,
-          clipId: c.id,
-          buffer: c.buffer,
-          start: c.start,
-          trimStart: c.trimStart ?? 0,
-          trimEnd: c.trimEnd ?? 0,
-        };
-    }
-    return null; // No clips — buffer-kind redo not applicable; caller handles null
   }
 
   #refreshHistoryFlags(): void {

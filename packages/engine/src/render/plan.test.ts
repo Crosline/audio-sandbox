@@ -211,4 +211,17 @@ describe('resolveRenderPlan — mixer resolution', () => {
     const plan = resolveRenderPlan(project, {}, project.tracks[0]!.id);
     expect(plan.tracks).toHaveLength(0);
   });
+
+  it('carries each track pan into its TrackPlan', () => {
+    const t = { ...trackWith('A'), pan: -0.5 };
+    const plan = resolveRenderPlan(createProject('p', [t]));
+    expect(plan.tracks[0]!.pan).toBe(-0.5);
+  });
+
+  it('defaults pan to 0 when the track has no pan field', () => {
+    const t = trackWith('A') as Track & { pan?: number };
+    delete t.pan;
+    const plan = resolveRenderPlan(createProject('p', [t]));
+    expect(plan.tracks[0]!.pan).toBe(0);
+  });
 });

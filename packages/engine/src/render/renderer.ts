@@ -6,7 +6,8 @@
  * resolved plan into an offline graph and renders it. It is verified in the app's browser E2E
  * (the node test env has no OfflineAudioContext), while the plan carries full unit coverage.
  *
- * Graph per render: for each track plan, clip sources → trackGain(plan.gain) → destination.
+ * Graph per render: for each track plan, clip sources → chain → trackGain(plan.gain) →
+ * panner(plan.pan) → destination. Post-fader order matches the live transport.
  */
 import { buildChain } from '../effects/nodes.js';
 import type { Project } from '../model/types.js';
@@ -52,19 +53,24 @@ export class Renderer {
     const ctx = new OfflineAudioContext(plan.channels, length, plan.sampleRate);
 
     for (const track of plan.tracks) {
-      const trackGain = ctx.createGain();
-      trackGain.gain.value = track.gain;
-
       // Re-instantiate the pedalboard chain in THIS offline context (nodes can't cross
       // contexts). Empty chains build a passthrough, so this wiring is uniform.
       const chain = buildChain(ctx, track.effects);
-      trackGain.connect(chain.input);
-      chain.output.connect(ctx.destination);
+      const trackGain = ctx.createGain();
+      trackGain.gain.value = track.gain;
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = track.pan;
+
+      // Post-fader order: source → chain → trackGain → panner → destination.
+      // Matches the live transport's wiring so export sounds identical to playback.
+      chain.output.connect(trackGain);
+      trackGain.connect(panner);
+      panner.connect(ctx.destination);
 
       for (const clip of track.clips) {
         const source = ctx.createBufferSource();
         source.buffer = clip.buffer;
-        source.connect(trackGain);
+        source.connect(chain.input);
         source.start(clip.when, clip.offset, clip.duration);
       }
     }
