@@ -63,14 +63,15 @@
     const interval = chooseInterval(pps);
     // Minor ticks at half the major interval for a finer grid.
     const minor = interval / 2;
-    const muted = 'rgba(148, 163, 184, 0.6)'; // slate-ish, matches --color-muted vibe
-    const faint = 'rgba(148, 163, 184, 0.25)';
+    const majorColor = 'rgba(139,145,163,0.65)';
+    const minorColor = 'rgba(139,145,163,0.22)';
+    const labelColor = 'rgba(139,145,163,0.85)';
 
-    ctx.font = '10px ui-monospace, monospace';
+    ctx.font = '9px "JetBrains Mono Variable", ui-monospace, monospace';
     ctx.textBaseline = 'top';
 
     // Minor ticks.
-    ctx.strokeStyle = faint;
+    ctx.strokeStyle = minorColor;
     ctx.beginPath();
     for (let t = 0, x = 0; x <= w; t += minor, x = t * pps) {
       // Skip positions that coincide with a major tick (drawn below).
@@ -81,8 +82,8 @@
     ctx.stroke();
 
     // Major ticks + labels.
-    ctx.strokeStyle = muted;
-    ctx.fillStyle = muted;
+    ctx.strokeStyle = majorColor;
+    ctx.fillStyle = labelColor;
     ctx.beginPath();
     for (let t = 0, x = 0; x <= w; t += interval, x = t * pps) {
       const px = Math.round(x) + 0.5;
@@ -91,6 +92,10 @@
       ctx.fillText(labelFor(t, interval), Math.round(x) + 3, 2);
     }
     ctx.stroke();
+
+    // 1px bottom hairline.
+    ctx.fillStyle = 'rgba(45,51,68,1)';
+    ctx.fillRect(0, h - 1, w, 1);
   }
 
   function onClick(e: MouseEvent): void {

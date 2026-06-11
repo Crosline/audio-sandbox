@@ -2,6 +2,7 @@
   import { clipDuration, type Track } from '@audiosandbox/engine';
   import type { Studio } from '../lib/studio.svelte.js';
   import Waveform from './Waveform.svelte';
+  import Icon from './Icon.svelte';
 
   interface Props {
     studio: Studio;
@@ -249,17 +250,23 @@
   <div class="flex">
     <!-- Track header — pinned to the left while the lane scrolls horizontally. -->
     <div
-      class="sticky left-0 z-20 flex w-52 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] group overflow-hidden"
-      style="height: {trackHeight}px"
+      class="relative sticky left-0 z-20 flex w-52 shrink-0 flex-col border-r border-[var(--color-border)] group overflow-hidden"
+      style="height: {trackHeight}px; background: linear-gradient(to bottom, var(--color-surface-2), var(--color-surface));"
     >
+      <!-- Color spine: 3px full-height strip in the track color -->
+      <div
+        class="absolute inset-y-0 left-0 w-[3px]"
+        style="background-color: {color}"
+      ></div>
+
       <!-- Row 1: editable name + delete -->
-      <div class="flex items-center gap-1 px-2 pt-2">
+      <div class="flex items-center gap-1 pl-3 pr-2 pt-2">
         <input
           type="text"
           class="min-w-0 flex-1 rounded bg-transparent px-1 py-0.5 text-sm font-medium
-                 outline-none ring-0 hover:bg-[var(--color-surface-2)]
-                 focus:bg-[var(--color-surface-2)] focus:ring-1 focus:ring-[var(--color-accent)]
-                 transition truncate"
+                 outline-none ring-0 hover:border hover:border-[var(--color-border-bright)]
+                 focus:border focus:border-[var(--color-accent)] focus:ring-0
+                 transition truncate text-[var(--color-text)]"
           bind:value={editName}
           onblur={commitName}
           onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); } }}
@@ -267,67 +274,67 @@
         <button
           class="grid h-6 w-6 shrink-0 place-items-center rounded text-xs font-semibold
                  opacity-0 transition group-hover:opacity-100
-                 bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-accent-2)]"
+                 bg-[var(--color-surface-3)] text-[var(--color-muted)] hover:text-[var(--color-accent)]"
           title="Delete track"
           aria-label="Delete track"
           data-testid="delete-track"
           onclick={() => studio.removeTrack(track.id)}
         >
-          ✕
+          <Icon name="x" size={12} strokeWidth={2.5} />
         </button>
       </div>
 
       <!-- Row 2: Volume -->
-      <div class="flex items-center gap-1 px-2 pt-1">
-        <span class="w-6 shrink-0 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">VOL</span>
+      <div class="flex items-center gap-1 pl-3 pr-2 pt-1">
+        <span class="w-6 shrink-0 text-[10px] uppercase tracking-wide text-[var(--color-muted)]">VOL</span>
         <input
           type="range"
           min="0"
           max="1.5"
           step="0.01"
           value={track.gain}
-          class="h-1 flex-1 accent-[var(--color-accent)]"
+          class="flex-1"
           oninput={(e) => onGainInput(Number(e.currentTarget.value))}
           ondblclick={resetGain}
         />
-        <span class="w-16 shrink-0 text-left text-[10px] tabular-nums text-[var(--color-muted)]">
+        <span class="w-16 shrink-0 text-left text-[10px] font-mono tabular-nums text-[var(--color-muted)]">
           {gainToDb(track.gain)}
         </span>
       </div>
 
       <!-- Row 3: Pan L/R -->
-      <div class="flex items-center gap-1 px-2 pt-1 pb-2">
-        <span class="w-6 shrink-0 text-[10px] uppercase tracking-wider text-[var(--color-muted)]">L/R</span>
+      <div class="flex items-center gap-1 pl-3 pr-2 pt-1 pb-2">
+        <span class="w-6 shrink-0 text-[10px] uppercase tracking-wide text-[var(--color-muted)]">L/R</span>
         <input
           type="range"
           min="-1"
           max="1"
           step="0.01"
           value={panValue}
-          class="h-1 flex-1 accent-[var(--color-accent)]"
+          class="flex-1"
           oninput={(e) => onPanInput(Number(e.currentTarget.value))}
           ondblclick={resetPan}
         />
-        <span class="w-10 shrink-0 text-left text-[10px] tabular-nums text-[var(--color-muted)]">
+        <span class="w-10 shrink-0 text-left text-[10px] font-mono tabular-nums text-[var(--color-muted)]">
           {panLabel(panValue)}
         </span>
       </div>
 
       <!-- Row 4: M / S buttons -->
-      <div class="flex items-center gap-1 px-2 pb-2">
+      <div class="flex items-center gap-1 pl-3 pr-2 pb-2">
         <button
           class="grid h-6 w-6 place-items-center rounded text-xs font-semibold transition
             {track.muted
-              ? 'bg-[var(--color-accent-2)] text-white'
-              : 'bg-[var(--color-surface-2)] text-[var(--color-muted)]'}"
+              ? 'bg-[#ffc145] text-black'
+              : 'border border-[var(--color-border-bright)] bg-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]'}"
           title="Mute"
           onclick={() => studio.toggleMute(track.id)}
         >M</button>
         <button
           class="grid h-6 w-6 place-items-center rounded text-xs font-semibold transition
             {track.soloed
-              ? 'bg-[var(--color-accent-3)] text-black'
-              : 'bg-[var(--color-surface-2)] text-[var(--color-muted)]'}"
+              ? 'bg-[#38bdf8] text-black'
+              : 'border border-[var(--color-border-bright)] bg-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]'}"
           title="Solo"
           onclick={() => studio.toggleSolo(track.id)}
         >S</button>
@@ -346,15 +353,19 @@
       onpointerup={onPointerUp}
     >
       {#each track.clips as clip (clip.id)}
+        {@const objSel = isObjectSelected(clip.id)}
         <div
-          class="absolute inset-y-0 overflow-hidden rounded-sm {isObjectSelected(clip.id)
-            ? 'border-2 border-[var(--color-accent)] cursor-grab'
-            : 'border border-[var(--color-border)]'}"
-          style="left: {studio.timeToPx(clip.start)}px; width: {studio.timeToPx(clipDuration(clip))}px"
+          class="absolute inset-y-0 overflow-hidden rounded-md {objSel ? 'cursor-grab' : 'group/clip hover:border-opacity-70'}"
+          style="left: {studio.timeToPx(clip.start)}px; width: {studio.timeToPx(clipDuration(clip))}px;
+            background-color: {color}12;
+            border: 1px solid {objSel ? color : color + '59'};
+            {objSel ? `box-shadow: 0 0 0 1px ${color}, 0 0 14px ${color}55;` : ''}"
           data-testid="clip"
           data-clip-id={clip.id}
           role="presentation"
           onpointerdown={(e) => onClipPointerDown(e, clip)}
+          onmouseenter={(e) => { if (!objSel) (e.currentTarget as HTMLElement).style.borderColor = color + 'b3'; }}
+          onmouseleave={(e) => { if (!objSel) (e.currentTarget as HTMLElement).style.borderColor = color + '59'; }}
         >
           <div class="absolute inset-y-0" style="left: {-studio.timeToPx(clip.trimStart ?? 0)}px">
             <Waveform buffer={clip.buffer} width={studio.timeToPx(clip.buffer.duration)} {color} height={trackHeight} stereo={clip.buffer.numberOfChannels >= 2} />
@@ -362,12 +373,15 @@
           {#if selFor(clip.id)}
             {@const sel = selFor(clip.id)!}
             <div
-              class="pointer-events-none absolute inset-y-0 border-x border-[var(--color-accent)] bg-[var(--color-accent)]/25"
+              class="pointer-events-none absolute inset-y-0"
               data-testid="selection"
               style="left: {studio.timeToPx(sel.start)}px; width: {Math.max(
                 1,
                 studio.timeToPx(sel.end - sel.start),
-              )}px"
+              )}px;
+              background: rgba(255,255,255,0.14);
+              border-left: 1px solid rgba(255,107,61,0.9);
+              border-right: 1px solid rgba(255,107,61,0.9);"
             ></div>
           {/if}
           <!-- edge resize handles -->
@@ -389,12 +403,13 @@
   </div>
   <!-- Resize handle: drag down >32px → 160px, drag up >32px → 110px -->
   <div
-    class="h-1 cursor-ns-resize border-b border-[var(--color-border)]
-           hover:bg-[var(--color-accent)]/30 transition-colors"
+    class="h-1 cursor-ns-resize border-b border-[var(--color-border)] transition-colors hover:bg-[rgba(255,107,61,0.4)]"
     role="separator"
     aria-label="Resize track"
     onpointerdown={onResizeHandlePointerDown}
     onpointermove={onResizeHandlePointerMove}
     onpointerup={onResizeHandlePointerUp}
+    onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,107,61,0.4)'; }}
+    onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = ''; }}
   ></div>
 </div>

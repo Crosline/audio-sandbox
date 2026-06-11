@@ -67,7 +67,7 @@ test.describe('timeline zoom, scroll & ruler', () => {
     await page.goto('/');
     await loadGeneratedClip(page, 'clip.wav', { seconds: 6 });
 
-    const time = page.locator('.font-mono').first();
+    const time = page.getByTestId('timecode');
     await expect(time).toHaveText('00:00.000');
     const ruler = await rulerCanvas(page);
     await page.mouse.click(ruler.x + ruler.w * 0.5, ruler.y + ruler.h / 2);

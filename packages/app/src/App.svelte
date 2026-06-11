@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { fly } from 'svelte/transition';
   import { tick } from 'svelte';
   import { projectDuration, VERSION } from '@audiosandbox/engine';
   import EditButtons from './components/EditButtons.svelte';
+  import Icon from './components/Icon.svelte';
+  import Logo from './components/Logo.svelte';
   import Minimap from './components/Minimap.svelte';
   import Pedalboard from './components/Pedalboard.svelte';
   import TimelineRuler from './components/TimelineRuler.svelte';
@@ -16,8 +19,9 @@
   // same Studio the UI already drives.
   (globalThis as unknown as { __studio?: Studio }).__studio = studio;
 
-  // Track accent colors cycle through the sketch's purple / pink / teal.
-  const TRACK_COLORS = ['#7c5cff', '#ec4899', '#22d3ee'];
+  // Track accent colors cycle through the SIGNAL spectrum palette.
+  // Warm/cool alternation so adjacent tracks are instantly distinguishable.
+  const TRACK_COLORS = ['#ff6b3d', '#38bdf8', '#ffc145', '#3ddc97', '#a78bfa', '#f472b6'];
   function colorFor(index: number): string {
     return TRACK_COLORS[index % TRACK_COLORS.length]!;
   }
@@ -233,75 +237,85 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="flex h-full flex-col">
-  <!-- Header -->
+  <!-- Header: slim top bar ~h-12 -->
   <header
-    class="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3"
+    class="flex h-12 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
   >
-    <div
-      class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] text-lg"
-    >
-      🎵
+    <!-- Left cluster: Logo + wordmark + project name -->
+    <div class="flex items-center gap-2.5">
+      <Logo playing={studio.transportState === 'playing'} size={30} />
+      <h1 class="flex items-center gap-1 text-[13px] font-semibold uppercase tracking-[0.18em]">
+        <span class="text-[var(--color-text)]">AUDIO</span><span class="text-[var(--color-accent)]">SANDBOX</span>
+      </h1>
+      <!-- Editable project name — ghost input style. No type attr: E2E locates the
+           track-name input via `input[type="text"]` .first(), which must not match this. -->
+      <input
+        class="ml-1 w-36 rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm text-[var(--color-muted)] transition-all duration-150 placeholder:text-[var(--color-muted)] hover:border-[var(--color-border)] hover:text-[var(--color-text)] focus:border-[var(--color-border-bright)] focus:bg-[var(--color-surface-2)] focus:text-[var(--color-text)] focus:outline-none"
+        aria-label="Project name"
+        spellcheck="false"
+        value={studio.project.name}
+        onblur={(e) => studio.renameProject(e.currentTarget.value)}
+        onkeydown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+          if (e.key === 'Escape') { e.currentTarget.value = studio.project.name; e.currentTarget.blur(); }
+        }}
+      />
     </div>
-    <h1 class="text-lg font-semibold tracking-tight">Audio Sandbox</h1>
-    <span
-      class="cursor-text rounded px-1 text-sm text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] focus:bg-[var(--color-surface-2)] focus:text-[var(--color-text)] focus:outline-none"
-      role="textbox"
-      tabindex="0"
-      aria-label="Project name"
-      contenteditable="true"
-      spellcheck="false"
-      onblur={(e) => studio.renameProject(e.currentTarget.textContent ?? '')}
-      onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { e.currentTarget.textContent = studio.project.name; e.currentTarget.blur(); } }}
-    >{studio.project.name}</span>
 
-    <!-- Edit controls: Cut/Copy/Paste/Delete/Silence/Trim/Fades · Undo/Redo. -->
-    <div class="ml-4"><EditButtons {studio} /></div>
+    <!-- Middle: Edit buttons -->
+    <div class="mx-4"><EditButtons {studio} /></div>
 
+    <!-- Right cluster: zoom + + Track + Import audio -->
     <div class="ml-auto flex items-center gap-2">
-      <!-- Zoom controls: − / readout / + / Fit -->
-      <div class="flex items-center gap-1 rounded-lg bg-[var(--color-surface-2)] p-0.5">
+      <!-- Zoom controls: segmented control group -->
+      <div class="flex items-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <button
-          class="grid h-7 w-7 place-items-center rounded text-sm transition hover:brightness-125"
+          class="flex h-7 w-7 items-center justify-center rounded-l-md text-[var(--color-muted)] transition-all duration-150 hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] active:translate-y-px"
           title="Zoom out"
           aria-label="Zoom out"
           onclick={() => zoomBy(0.8)}
         >
-          −
+          <Icon name="zoom-out" size={14} />
         </button>
         <span
-          class="w-14 text-center text-xs tabular-nums text-[var(--color-muted)]"
+          class="w-14 border-x border-[var(--color-border)] text-center font-mono text-[11px] tabular-nums text-[var(--color-muted)]"
           title="Pixels per second"
         >
           {Math.round(studio.pxPerSec)} px/s
         </span>
         <button
-          class="grid h-7 w-7 place-items-center rounded text-sm transition hover:brightness-125"
+          class="flex h-7 w-7 items-center justify-center text-[var(--color-muted)] transition-all duration-150 hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] active:translate-y-px"
           title="Zoom in"
           aria-label="Zoom in"
           onclick={() => zoomBy(1.25)}
         >
-          +
+          <Icon name="zoom-in" size={14} />
         </button>
         <button
-          class="rounded px-2 py-1 text-xs transition hover:brightness-125 disabled:opacity-40"
+          class="flex h-7 items-center justify-center rounded-r-md border-l border-[var(--color-border)] px-2 text-[var(--color-muted)] transition-all duration-150 hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] active:translate-y-px disabled:opacity-40"
           title="Fit project to window"
           aria-label="Fit project to window"
           disabled={duration === 0}
           onclick={fitToWindow}
         >
-          Fit
+          <Icon name="fit" size={14} />
         </button>
       </div>
+
+      <!-- + Track button -->
       <button
-        class="rounded-lg bg-[var(--color-surface-2)] px-3 py-1.5 text-sm transition hover:brightness-125"
+        class="flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 text-xs text-[var(--color-muted)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-150 hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] active:translate-y-px"
         onclick={() => studio.addTrack()}
       >
         + Track
       </button>
+
+      <!-- Import audio: primary accent button -->
       <button
-        class="rounded-lg bg-[var(--color-surface-2)] px-3 py-1.5 text-sm transition hover:brightness-125"
+        class="flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/15 px-2.5 text-xs text-[var(--color-accent)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-150 hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/25 hover:text-[var(--color-accent-2)] active:translate-y-px"
         onclick={() => fileInput.click()}
       >
+        <Icon name="upload" size={13} />
         Import audio
       </button>
       <input
@@ -331,12 +345,12 @@
     onscroll={() => { scrollerLeft = scroller?.scrollLeft ?? 0; }}
   >
     {#if studio.project.tracks.length === 0}
-      <div
-        class="grid h-full place-items-center text-center text-[var(--color-muted)]"
-      >
-        <div>
-          <p class="text-sm">Drop an audio file here, or use "Import audio".</p>
-          <p class="mt-1 text-xs">WAV · MP3 · OGG</p>
+      <!-- Empty state: hero drop zone -->
+      <div class="grid h-full place-items-center p-8 text-center">
+        <div class="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-[var(--color-border-bright)] px-16 py-12">
+          <Icon name="waveform" size={40} class="text-[var(--color-accent)]/50" />
+          <p class="text-base font-medium text-[var(--color-text)]">Drop an audio file here</p>
+          <p class="text-xs text-[var(--color-muted)]">WAV · MP3 · AAC</p>
         </div>
       </div>
     {:else}
@@ -351,15 +365,22 @@
       </div>
 
       {#each studio.project.tracks as track, i (track.id)}
-        <TrackRow {studio} {track} color={colorFor(i)} onheightchange={onTrackHeightChange} />
+        <div transition:fly={{ y: 8, duration: 150 }}>
+          <TrackRow {studio} {track} color={colorFor(i)} onheightchange={onTrackHeightChange} />
+        </div>
       {/each}
 
-      <!-- Playhead overlay: positioned in the scrolling content, so it moves with the lanes. -->
+      <!-- Playhead overlay: 1px accent line with glow + triangle cap -->
       {#if duration > 0}
         <div
-          class="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-white/80"
-          style="left: {HEADER_W + studio.timeToPx(studio.playhead)}px"
-        ></div>
+          class="pointer-events-none absolute top-0 bottom-0 z-10"
+          style="left: {HEADER_W + studio.timeToPx(studio.playhead)}px; width: 1px; background: var(--color-accent); box-shadow: 0 0 8px rgba(255,107,61,0.8);"
+        >
+          <!-- Downward-pointing triangle cap at the top -->
+          <div
+            style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--color-accent);"
+          ></div>
+        </div>
       {/if}
 
       <Minimap
@@ -376,7 +397,11 @@
   </main>
 
   {#if loadError}
-    <div class="bg-[var(--color-accent-2)]/20 px-5 py-2 text-sm text-[var(--color-accent-2)]">
+    <div
+      class="flex items-center gap-2 border-t border-red-500/40 bg-red-500/12 px-5 py-2 text-sm text-red-200"
+      transition:fly={{ y: 8, duration: 150 }}
+    >
+      <Icon name="x" size={14} class="shrink-0 text-red-400" />
       {loadError}
     </div>
   {/if}
@@ -387,7 +412,7 @@
 
   <TransportBar {studio} {fxOpen} onToggleFx={() => (fxOpen = !fxOpen)} />
 
-  <div class="px-5 pb-1 text-right text-[10px] text-[var(--color-muted)]">
+  <div class="px-5 pb-1 text-right font-mono text-[10px] text-[var(--color-muted)]">
     engine v{VERSION}
   </div>
 </div>

@@ -7,6 +7,8 @@ test.describe('pedalboard', () => {
     await loadGeneratedClip(page, 'a.wav', { seconds: 2 });
     const trackId = await trackIdAt(page, 0);
 
+    // The pedalboard is closed by default — open it via the transport FX toggle.
+    await page.getByRole('button', { name: 'Show Pedalboard FX' }).click();
     const pedalboard = page.locator('[data-pedalboard]');
     await expect(pedalboard.getByText('No effects yet.')).toBeVisible();
 
@@ -38,6 +40,8 @@ test.describe('pedalboard', () => {
     await loadGeneratedClip(page, 'a.wav', { seconds: 2 });
     const trackId = await trackIdAt(page, 0);
 
+    // The pedalboard is closed by default — open it via the transport FX toggle.
+    await page.getByRole('button', { name: 'Show Pedalboard FX' }).click();
     await page.getByRole('button', { name: 'Add effect' }).click();
     await page.getByRole('menuitem', { name: 'Distortion' }).click();
     expect(await trackEffects(page, trackId)).toMatchObject([{ kind: 'distortion', bypass: false }]);

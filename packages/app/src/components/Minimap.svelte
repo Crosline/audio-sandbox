@@ -81,7 +81,10 @@
     const vx = Math.max(0, scrollLeft * scaleX);
     const vw = Math.min(W - vx, viewportWidth * scaleX);
     const accentColor =
-      getComputedStyle(canvas).getPropertyValue('--color-accent').trim() || '#a855f7';
+      getComputedStyle(canvas).getPropertyValue('--color-accent').trim() || '#ff6b3d';
+    // Fill with accent at ~8% alpha before stroking.
+    ctx.fillStyle = accentColor + '14'; // ~8% = 0x14/0xff ≈ 8%
+    ctx.fillRect(vx + 0.5, 0.5, Math.max(2, vw - 1), H - 1);
     ctx.strokeStyle = accentColor;
     ctx.lineWidth = 1;
     ctx.strokeRect(vx + 0.5, 0.5, Math.max(2, vw - 1), H - 1);
@@ -111,8 +114,8 @@
 
 {#if project.tracks.length > 0}
   <div
-    class="fixed bottom-25 right-3 z-30 overflow-hidden rounded-lg border border-[var(--color-border)]
-           bg-[var(--color-surface)]/85 backdrop-blur-sm"
+    class="fixed bottom-25 right-3 z-30 overflow-hidden rounded-lg border border-[var(--color-border-bright)]
+           bg-[var(--color-surface)]/85 backdrop-blur-sm shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
     style="width: {W}px; height: {H}px"
   >
     <canvas

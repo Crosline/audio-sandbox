@@ -1,26 +1,44 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
 
 /* Dark-mode-first. The `dark` class on <html> is the default; this enables
    `dark:` variants to be driven by that class rather than the OS setting. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens — flat, sleek, dark. Tuned to the GameAudio Studio sketch:
-   near-black canvas, purple/pink/teal accents for tracks and FX. */
+/* ============================================================
+   SIGNAL — the Audio Sandbox design language.
+   Deep blue-black chassis, hairline borders, one hot accent
+   (signal orange), spectrum track colors, mono numerals.
+   Token NAMES are stable API for components; values theme here.
+   ============================================================ */
 @theme {
-  --color-bg: #0a0a0c;
-  --color-surface: #121216;
-  --color-surface-2: #1a1a20;
-  --color-border: #26262e;
-  --color-text: #e8e8ee;
-  --color-muted: #8a8a96;
+  --color-bg: #07080c;
+  --color-surface: #0d0f15;
+  --color-surface-2: #14171f;
+  --color-surface-3: #1b1f2b;
+  --color-border: #1f2330;
+  --color-border-bright: #2d3344;
+  --color-text: #e9ecf4;
+  --color-muted: #8b91a3;
 
-  --color-accent: #a855f7; /* purple — primary */
-  --color-accent-2: #ec4899; /* pink */
-  --color-accent-3: #22d3ee; /* teal */
+  --color-accent: #ff6b3d; /* signal orange — primary */
+  --color-accent-2: #ffa14d; /* hot amber — gradients, hover heat */
+  --color-accent-3: #38bdf8; /* sky — informational/secondary */
 
-  --color-track-1: #7c5cff;
-  --color-track-2: #ec4899;
-  --color-track-3: #22d3ee;
+  /* Spectrum — per-track hues, warm → cool cycle */
+  --color-track-1: #ff6b3d;
+  --color-track-2: #ffc145;
+  --color-track-3: #3ddc97;
+  --color-track-4: #38bdf8;
+  --color-track-5: #a78bfa;
+  --color-track-6: #f472b6;
+
+  --font-sans: 'Space Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', monospace;
+
+  --shadow-glow-accent: 0 0 12px rgba(255, 107, 61, 0.45);
+  --shadow-raised: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 html,
@@ -30,13 +48,156 @@ body {
 
 body {
   margin: 0;
-  background: var(--color-bg);
   color: var(--color-text);
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  /* Chassis: ink base with a faint warm glow rising from the transport. */
+  background:
+    radial-gradient(120% 70% at 50% 115%, rgba(255, 107, 61, 0.07), transparent 60%),
+    radial-gradient(100% 60% at 50% -10%, rgba(56, 189, 248, 0.05), transparent 55%),
+    var(--color-bg);
+  background-attachment: fixed;
+}
+
+/* Film grain — keeps large dark fields from banding, adds material feel. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 #app {
   height: 100%;
+}
+
+::selection {
+  background: rgba(255, 107, 61, 0.35);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* --- Scrollbars: thin, chassis-toned --- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-bright) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-bright);
+  border-radius: 6px;
+  border: 3px solid var(--color-bg);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --- Range inputs: hardware-fader styling, app-wide --- */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--color-border-bright), var(--color-border));
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 9999px;
+  background: var(--color-text);
+  border: 2px solid var(--color-surface-3);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+input[type='range']:hover::-webkit-slider-thumb,
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  background: var(--color-accent);
+  box-shadow: var(--shadow-glow-accent);
+  transform: scale(1.15);
+}
+input[type='range']::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-border-bright);
+}
+input[type='range']::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-text);
+  border: 2px solid var(--color-surface-3);
+}
+input[type='range']:hover::-moz-range-thumb {
+  background: var(--color-accent);
+}
+
+/* --- Motion vocabulary --- */
+@keyframes signal-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 61, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 107, 61, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 61, 0);
+  }
+}
+@keyframes eq-bar {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes marquee-glow {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-signal-pulse {
+  animation: signal-pulse 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

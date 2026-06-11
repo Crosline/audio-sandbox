@@ -37,6 +37,31 @@
     }
   });
 
+  /**
+   * Mix a hex color ~45% toward white.
+   * Input: '#rrggbb' or '#rgb'. Output: '#rrggbb'.
+   */
+  function brighten(hex: string): string {
+    // Normalise to 6-digit form.
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    const t = 0.45; // mix toward white
+    const mix = (c: number) => Math.round(c + (255 - c) * t).toString(16).padStart(2, '0');
+    return '#' + mix(r) + mix(g) + mix(b);
+  }
+
+  /** Build a vertical linear gradient for a canvas context spanning pixelHeight. */
+  function makeGradient(ctx: CanvasRenderingContext2D, fill: string, pixelHeight: number): CanvasGradient {
+    const grad = ctx.createLinearGradient(0, 0, 0, pixelHeight);
+    grad.addColorStop(0, fill);
+    grad.addColorStop(0.5, brighten(fill));
+    grad.addColorStop(1, fill);
+    return grad;
+  }
+
   function drawMono(
     cv: HTMLCanvasElement,
     buf: AudioBuffer,
@@ -54,7 +79,7 @@
     const peaks = extractPeaks(buf, pixelWidth);
     const mid = pixelHeight / 2;
     const amp = pixelHeight / 2;
-    ctx.fillStyle = fill;
+    ctx.fillStyle = makeGradient(ctx, fill, pixelHeight);
     for (let x = 0; x < pixelWidth; x++) {
       let lo = 0, hi = 0;
       for (const ch of peaks.channels) {
@@ -65,6 +90,9 @@
       const yBottom = mid - lo * amp;
       ctx.fillRect(x, yTop, 1, Math.max(1, yBottom - yTop));
     }
+    // 1px horizontal midline across the full width.
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(0, Math.round(mid), pixelWidth, 1);
   }
 
   function drawChannel(
@@ -87,7 +115,7 @@
     if (!ch) return;
     const mid = pixelHeight / 2;
     const amp = pixelHeight / 2;
-    ctx.fillStyle = fill;
+    ctx.fillStyle = makeGradient(ctx, fill, pixelHeight);
     for (let x = 0; x < pixelWidth; x++) {
       const lo = ch.min[x] ?? 0;
       const hi = ch.max[x] ?? 0;
@@ -95,6 +123,9 @@
       const yBottom = mid - lo * amp;
       ctx.fillRect(x, yTop, 1, Math.max(1, yBottom - yTop));
     }
+    // 1px horizontal midline across the full width.
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(0, Math.round(mid), pixelWidth, 1);
   }
 </script>
 

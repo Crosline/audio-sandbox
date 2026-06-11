@@ -11,7 +11,7 @@ test.describe('transport stop-at-end', () => {
     const ruler = await rulerCanvas(page);
     await page.mouse.click(ruler.x + ruler.w * 0.98, ruler.y + ruler.h / 2);
 
-    const time = page.locator('.font-mono').first();
+    const time = page.getByTestId('timecode');
     await expect(time).not.toHaveText('00:00.000'); // seek landed near the end
 
     await page.getByRole('button', { name: 'Play' }).click();
